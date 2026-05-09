@@ -144,6 +144,9 @@ func TestMatchitConflicts(t *testing.T) {
 		if conflict.With != tt.first {
 			t.Fatalf("conflict with = %q, want %q", conflict.With, tt.first)
 		}
+		if conflict.Route != tt.second {
+			t.Fatalf("conflict route = %q, want %q", conflict.Route, tt.second)
+		}
 	}
 }
 

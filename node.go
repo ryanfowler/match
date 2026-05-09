@@ -13,7 +13,8 @@ var (
 )
 
 type ConflictError struct {
-	With string
+	Route string
+	With  string
 }
 
 func (e *ConflictError) Error() string {
@@ -98,7 +99,7 @@ func (n *node[T]) insert(route string, value T) error {
 		n.normalized = make(map[string]string)
 	}
 	if existing, ok := n.normalized[entry.normalized]; ok {
-		return &ConflictError{With: existing}
+		return &ConflictError{Route: entry.route, With: existing}
 	}
 
 	if entry.dynamic || n.root.conflictsWithCatchAllStatic(entry.segments, 0) {
@@ -107,7 +108,7 @@ func (n *node[T]) insert(route string, value T) error {
 				continue
 			}
 			if conflictsEntries(existing, entry) {
-				return &ConflictError{With: existing.route}
+				return &ConflictError{Route: entry.route, With: existing.route}
 			}
 		}
 	}
