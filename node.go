@@ -3,6 +3,7 @@ package match
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -414,7 +415,7 @@ func parseRoute(route string) ([]token, string, error) {
 	var normalized strings.Builder
 	var literal strings.Builder
 	paramsInSegment := 0
-	paramOrdinal := byte('a')
+	paramOrdinal := 0
 
 	flushLiteral := func() {
 		if literal.Len() == 0 {
@@ -422,6 +423,9 @@ func parseRoute(route string) ([]token, string, error) {
 		}
 		text := literal.String()
 		tokens = append(tokens, token{kind: tokenLiteral, text: text})
+		normalized.WriteByte('L')
+		normalized.WriteString(strconv.Itoa(len(text)))
+		normalized.WriteByte(':')
 		normalized.WriteString(text)
 		literal.Reset()
 	}
@@ -460,14 +464,14 @@ func parseRoute(route string) ([]token, string, error) {
 					return nil, "", ErrInvalidCatchAll
 				}
 				tokens = append(tokens, token{kind: tokenCatchAll, text: name})
-				normalized.WriteString("{*")
-				normalized.WriteString(name)
-				normalized.WriteByte('}')
+				normalized.WriteByte('C')
+				normalized.WriteString(strconv.Itoa(paramOrdinal))
+				normalized.WriteByte(';')
 			} else {
 				tokens = append(tokens, token{kind: tokenParam, text: name})
-				normalized.WriteByte('{')
-				normalized.WriteByte(paramOrdinal)
-				normalized.WriteByte('}')
+				normalized.WriteByte('P')
+				normalized.WriteString(strconv.Itoa(paramOrdinal))
+				normalized.WriteByte(';')
 				paramOrdinal++
 			}
 			i = end + 1

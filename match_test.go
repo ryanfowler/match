@@ -2,6 +2,8 @@ package match
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -150,6 +152,62 @@ func TestMatchitConflicts(t *testing.T) {
 	}
 }
 
+func TestMatchitManyParameters(t *testing.T) {
+	const paramCount = 300
+	route := makeParamRoute("p", paramCount)
+	conflicting := makeParamRoute("q", paramCount)
+	path := makePath("v", paramCount)
+
+	var router Router[string]
+	if err := router.TryInsert(route, "many"); err != nil {
+		t.Fatalf("insert many-param route: %v", err)
+	}
+
+	got, params, ok := router.Match(path)
+	if !ok {
+		t.Fatalf("match many-param path: not found")
+	}
+	if got != "many" {
+		t.Fatalf("value = %q, want many", got)
+	}
+	if len(params) != paramCount {
+		t.Fatalf("params length = %d, want %d", len(params), paramCount)
+	}
+	for i, param := range params {
+		want := Param{Key: fmt.Sprintf("p%d", i), Val: fmt.Sprintf("v%d", i)}
+		if param != want {
+			t.Fatalf("params[%d] = %#v, want %#v", i, param, want)
+		}
+	}
+
+	var conflict *ConflictError
+	if err := router.TryInsert(conflicting, "conflicting"); !errors.As(err, &conflict) {
+		t.Fatalf("insert conflicting many-param route error = %v, want conflict", err)
+	}
+}
+
+func TestMatchitHighParameterOrdinalDoesNotCollideWithLiteral(t *testing.T) {
+	dynamic := makeParamRoute("p", 257)
+	static := makeParamRoute("q", 256) + "/{{a}}"
+	path := makePath("v", 256) + "/{a}"
+
+	var router Router[string]
+	if err := router.TryInsert(dynamic, "dynamic"); err != nil {
+		t.Fatalf("insert dynamic route: %v", err)
+	}
+	if err := router.TryInsert(static, "static"); err != nil {
+		t.Fatalf("insert static route: %v", err)
+	}
+
+	got, _, ok := router.Match(path)
+	if !ok {
+		t.Fatalf("match high-ordinal literal path: not found")
+	}
+	if got != "static" {
+		t.Fatalf("value = %q, want static", got)
+	}
+}
+
 func TestMatchIntoReusesParams(t *testing.T) {
 	var router Router[string]
 	router.Insert("/teams/{team}/members/{member}", "member")
@@ -171,6 +229,25 @@ func TestMatchIntoReusesParams(t *testing.T) {
 	if cap(params) != cap(buf) {
 		t.Fatalf("params cap = %d, want reused cap %d", cap(params), cap(buf))
 	}
+}
+
+func makeParamRoute(prefix string, count int) string {
+	var b strings.Builder
+	for i := 0; i < count; i++ {
+		b.WriteString("/{")
+		b.WriteString(fmt.Sprintf("%s%d", prefix, i))
+		b.WriteByte('}')
+	}
+	return b.String()
+}
+
+func makePath(prefix string, count int) string {
+	var b strings.Builder
+	for i := 0; i < count; i++ {
+		b.WriteByte('/')
+		b.WriteString(fmt.Sprintf("%s%d", prefix, i))
+	}
+	return b.String()
 }
 
 type matchCase struct {
