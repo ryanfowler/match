@@ -1,23 +1,45 @@
 package match
 
+// Router maps route patterns to caller-provided values.
+//
+// The zero value is ready to use. A Router is not safe for concurrent mutation;
+// callers that insert routes while matching from other goroutines must
+// synchronize access.
 type Router[T any] struct {
 	root node[T]
 }
 
+// Insert registers route with value.
+//
+// It panics with the same errors returned by TryInsert when route is invalid or
+// conflicts with an existing route.
 func (r *Router[T]) Insert(route string, value T) {
 	if err := r.TryInsert(route, value); err != nil {
 		panic(err)
 	}
 }
 
+// TryInsert registers route with value.
+//
+// It returns an error when route has invalid parameter syntax or when it would
+// conflict with an existing route. Duplicate and ambiguous routes return a
+// *ConflictError.
 func (r *Router[T]) TryInsert(route string, value T) error {
 	return r.root.insert(route, value)
 }
 
+// Match returns the value and parameters for route.
+//
+// The boolean result is false when no registered route matches; in that case
+// the value is the zero value of T and the returned Params is empty.
 func (r *Router[T]) Match(route string) (T, Params, bool) {
 	return r.root.match(route)
 }
 
+// MatchInto returns the value and parameters for route using params as storage.
+//
+// The input Params value is reset before matching. Use NewParams to create a
+// reusable Params buffer large enough for the expected number of captures.
 func (r *Router[T]) MatchInto(route string, params Params) (T, Params, bool) {
 	return r.root.matchInto(route, params)
 }

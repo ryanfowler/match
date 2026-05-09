@@ -8,16 +8,30 @@ import (
 )
 
 var (
+	// ErrInvalidParamSegment reports a route segment that contains more than
+	// one parameter.
 	ErrInvalidParamSegment = errors.New("only one parameter is allowed per path segment")
-	ErrInvalidParam        = errors.New("parameters must be registered with a valid name")
-	ErrInvalidCatchAll     = errors.New("catch-all parameters are only allowed at the end of a route")
+
+	// ErrInvalidParam reports malformed parameter syntax or an invalid
+	// parameter name.
+	ErrInvalidParam = errors.New("parameters must be registered with a valid name")
+
+	// ErrInvalidCatchAll reports a catch-all parameter that is not the final
+	// token in its route.
+	ErrInvalidCatchAll = errors.New("catch-all parameters are only allowed at the end of a route")
 )
 
+// ConflictError reports a route that cannot be inserted because it overlaps an
+// already registered route.
 type ConflictError struct {
+	// Route is the route that failed to insert.
 	Route string
-	With  string
+
+	// With is the previously registered route that conflicts with Route.
+	With string
 }
 
+// Error returns a human-readable description of the route conflict.
 func (e *ConflictError) Error() string {
 	return fmt.Sprintf("insertion failed due to conflict with previously registered route: %s", e.With)
 }

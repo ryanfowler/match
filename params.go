@@ -2,13 +2,22 @@ package match
 
 import "iter"
 
+// Param is one captured route parameter.
 type Param struct {
+	// Key is the parameter name from the matched route.
 	Key string
+
+	// Val is the substring captured from the matched path.
 	Val string
 }
 
 const inlineParams = 4
 
+// Params stores captured route parameters in route order.
+//
+// Params is an opaque value type. Use Len and At to inspect captures without
+// allocation, Get or TryGet to look up a named capture, and AppendTo or All
+// when a []Param snapshot is needed.
 type Params struct {
 	len    int
 	inline [inlineParams]Param
@@ -16,6 +25,9 @@ type Params struct {
 }
 
 // NewParams returns an empty Params value with room for capacity parameters.
+//
+// It is most useful with Router.MatchInto when callers want to reuse storage
+// across matches.
 func NewParams(capacity int) Params {
 	if capacity <= inlineParams {
 		return Params{}
@@ -23,7 +35,7 @@ func NewParams(capacity int) Params {
 	return Params{heap: make([]Param, 0, capacity)}
 }
 
-// ParamsOf returns a Params value containing params.
+// ParamsOf returns a Params value containing params in the same order.
 func ParamsOf(params ...Param) Params {
 	p := NewParams(len(params))
 	for i := range params {
@@ -38,6 +50,8 @@ func (p Params) Len() int {
 }
 
 // At returns the parameter at index i.
+//
+// It panics if i is outside the range [0, Len()).
 func (p Params) At(i int) Param {
 	if i < 0 || i >= p.len {
 		panic("match: parameter index out of range")
