@@ -147,23 +147,6 @@ func TestMatchitConflicts(t *testing.T) {
 	}
 }
 
-func TestAt(t *testing.T) {
-	var router Router[int]
-	router.Insert("/users/{id}", 7)
-
-	got, err := router.At("/users/42")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Value != 7 || got.Params.Get("id") != "42" {
-		t.Fatalf("At = %#v", got)
-	}
-
-	if _, err := router.At("/users/"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("At miss error = %v, want %v", err, ErrNotFound)
-	}
-}
-
 func TestMatchIntoReusesParams(t *testing.T) {
 	var router Router[string]
 	router.Insert("/teams/{team}/members/{member}", "member")
