@@ -63,7 +63,27 @@ value, _, _ := router.Match("/posts/2026/index")
 ```
 
 Parameters are returned in route order. `Match` allocates parameter storage as
-needed. `MatchInto` reuses a caller-provided `Params` buffer.
+needed after a small inline buffer is exhausted. `MatchInto` reuses a
+caller-provided `Params` value:
+
+```go
+params := match.NewParams(8)
+
+value, params, ok := router.MatchInto("/posts/2026/route-grammar", params)
+_ = value
+_ = ok
+_ = params.Len()
+_ = params.At(0)
+
+for key, val := range params.Seq() {
+	_ = key
+	_ = val
+}
+```
+
+`Params` is opaque. Use `Len` and `At` to iterate without allocation, `Get` or
+`TryGet` to look up a named parameter, `Seq` for range-over-function iteration,
+and `AppendTo` or `All` when a `[]Param` snapshot is needed.
 
 ## Conflicts
 

@@ -32,8 +32,12 @@
 // set of paths. Insert panics on invalid or conflicting routes; TryInsert
 // returns the error.
 //
-// Matching returns parameters in route order. Match allocates parameter storage
-// as needed, while MatchInto reuses the caller-provided Params buffer.
+// Matching returns parameters in route order. Params is an opaque value type;
+// use Len and At to iterate without allocation, Get or TryGet to look up named
+// parameters, Seq for range-over-function iteration, and AppendTo or All when a
+// []Param snapshot is needed. Match allocates parameter storage as needed after
+// a small inline buffer is exhausted, while MatchInto reuses the caller-provided
+// Params value.
 //
 // # Examples
 //

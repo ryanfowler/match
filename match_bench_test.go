@@ -114,7 +114,7 @@ func BenchmarkMatchInto(b *testing.B) {
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
 			router := benchmarkRouter(b, bm.routes)
-			params := make(Params, 0, 4)
+			params := NewParams(4)
 			b.ReportAllocs()
 			b.ResetTimer()
 

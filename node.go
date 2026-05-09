@@ -121,19 +121,19 @@ func (n *node[T]) insert(route string, value T) error {
 }
 
 func (n *node[T]) match(route string) (T, Params, bool) {
-	entry, params, ok := n.root.matchPath(route, 0, nil)
+	entry, params, ok := n.root.matchPath(route, 0, Params{})
 	if !ok {
 		var val T
-		return val, nil, false
+		return val, Params{}, false
 	}
 	return entry.value, params, true
 }
 
 func (n *node[T]) matchInto(route string, params Params) (T, Params, bool) {
-	entry, params, ok := n.root.matchPath(route, 0, params[:0])
+	entry, params, ok := n.root.matchPath(route, 0, params.reset())
 	if !ok {
 		var val T
-		return val, nil, false
+		return val, Params{}, false
 	}
 	return entry.value, params, true
 }
@@ -190,7 +190,7 @@ func (n *segmentNode[T]) matchPath(path string, index int, params Params) (*rout
 		if n.value != nil {
 			return n.value, params, true
 		}
-		return nil, nil, false
+		return nil, Params{}, false
 	}
 
 	segment, next := nextPathSegment(path, index)
@@ -216,7 +216,7 @@ func (n *segmentNode[T]) matchPath(path string, index int, params Params) (*rout
 		}
 	}
 
-	return nil, nil, false
+	return nil, Params{}, false
 }
 
 func (n *segmentNode[T]) staticChild(segment string) *segmentNode[T] {
@@ -375,39 +375,39 @@ func matchSegmentFrom(tokens []token, ti int, segment string, si int, params Par
 		if si == len(segment) {
 			return params, true
 		}
-		return nil, false
+		return Params{}, false
 	}
 
 	t := tokens[ti]
 	switch t.kind {
 	case tokenLiteral:
 		if !strings.HasPrefix(segment[si:], t.text) {
-			return nil, false
+			return Params{}, false
 		}
 		return matchSegmentFrom(tokens, ti+1, segment, si+len(t.text), params)
 	case tokenParam:
 		for end := len(segment); end > si; end-- {
-			next := appendParam(params, t.text, segment[si:end])
+			next := params.append(t.text, segment[si:end])
 			if got, ok := matchSegmentFrom(tokens, ti+1, segment, end, next); ok {
 				return got, true
 			}
 		}
-		return nil, false
+		return Params{}, false
 	default:
-		return nil, false
+		return Params{}, false
 	}
 }
 
 func matchCatchAll[T any](edge catchAllEdge[T], rest string, params Params) (Params, bool) {
 	if !strings.HasPrefix(rest, edge.pattern.prefix) {
-		return nil, false
+		return Params{}, false
 	}
 
 	value := rest[len(edge.pattern.prefix):]
 	if value == "" {
-		return nil, false
+		return Params{}, false
 	}
-	return appendParam(params, edge.token.text, value), true
+	return params.append(edge.token.text, value), true
 }
 
 func parseRoute(route string) ([]token, string, error) {
@@ -538,22 +538,6 @@ func unescapeBraces(s string) string {
 		b.WriteByte(s[i])
 	}
 	return b.String()
-}
-
-func appendParam(params Params, key, val string) Params {
-	if len(params) == cap(params) {
-		nextCap := 2
-		if len(params) >= nextCap {
-			nextCap = len(params) * 2
-		}
-		next := make(Params, len(params), nextCap)
-		copy(next, params)
-		params = next
-	}
-
-	next := params[:len(params)+1]
-	next[len(params)] = Param{Key: key, Val: val}
-	return next
 }
 
 func conflictsEntries[T any](a, b routeEntry[T]) bool {

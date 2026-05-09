@@ -17,45 +17,45 @@ func TestMatchitCoreMatches(t *testing.T) {
 			name:   "blog",
 			routes: []string{"/{page}", "/posts/{year}/{month}/{post}", "/posts/{year}/{month}/index", "/posts/{year}/top", "/static/{*path}", "/favicon.ico"},
 			matches: []matchCase{
-				{"/about", "/{page}", Params{{"page", "about"}}},
-				{"/posts/2021/01/rust", "/posts/{year}/{month}/{post}", Params{{"year", "2021"}, {"month", "01"}, {"post", "rust"}}},
-				{"/posts/2021/01/index", "/posts/{year}/{month}/index", Params{{"year", "2021"}, {"month", "01"}}},
-				{"/posts/2021/top", "/posts/{year}/top", Params{{"year", "2021"}}},
-				{"/static/foo.png", "/static/{*path}", Params{{"path", "foo.png"}}},
-				{"/favicon.ico", "/favicon.ico", nil},
+				{"/about", "/{page}", ParamsOf(Param{"page", "about"})},
+				{"/posts/2021/01/rust", "/posts/{year}/{month}/{post}", ParamsOf(Param{"year", "2021"}, Param{"month", "01"}, Param{"post", "rust"})},
+				{"/posts/2021/01/index", "/posts/{year}/{month}/index", ParamsOf(Param{"year", "2021"}, Param{"month", "01"})},
+				{"/posts/2021/top", "/posts/{year}/top", ParamsOf(Param{"year", "2021"})},
+				{"/static/foo.png", "/static/{*path}", ParamsOf(Param{"path", "foo.png"})},
+				{"/favicon.ico", "/favicon.ico", Params{}},
 			},
 		},
 		{
 			name:   "wildcard suffix",
 			routes: []string{"/", "/{foo}x", "/foox", "/{foo}x/bar", "/{foo}x/bar/baz"},
 			matches: []matchCase{
-				{"/", "/", nil},
-				{"/foox", "/foox", nil},
-				{"/barx", "/{foo}x", Params{{"foo", "bar"}}},
-				{"/mx", "/{foo}x", Params{{"foo", "m"}}},
-				{"/mx/bar", "/{foo}x/bar", Params{{"foo", "m"}}},
-				{"/xfoox/bar/baz", "/{foo}x/bar/baz", Params{{"foo", "xfoo"}}},
+				{"/", "/", Params{}},
+				{"/foox", "/foox", Params{}},
+				{"/barx", "/{foo}x", ParamsOf(Param{"foo", "bar"})},
+				{"/mx", "/{foo}x", ParamsOf(Param{"foo", "m"})},
+				{"/mx/bar", "/{foo}x/bar", ParamsOf(Param{"foo", "m"})},
+				{"/xfoox/bar/baz", "/{foo}x/bar/baz", ParamsOf(Param{"foo", "xfoo"})},
 			},
 		},
 		{
 			name:   "catchall overlap",
 			routes: []string{"/path/foo", "/path/{*rest}"},
 			matches: []matchCase{
-				{"/path/foo", "/path/foo", nil},
-				{"/path/bar", "/path/{*rest}", Params{{"rest", "bar"}}},
-				{"/path/foo/", "/path/{*rest}", Params{{"rest", "foo/"}}},
+				{"/path/foo", "/path/foo", Params{}},
+				{"/path/bar", "/path/{*rest}", ParamsOf(Param{"rest", "bar"})},
+				{"/path/foo/", "/path/{*rest}", ParamsOf(Param{"rest", "foo/"})},
 			},
 		},
 		{
 			name:   "escaped",
 			routes: []string{"/", "/{{", "/}}", "/{ba{{r}", "/baz/{xxx}/}}xy{{{{", "/{{/{x}"},
 			matches: []matchCase{
-				{"/", "/", nil},
-				{"/{", "/{{", nil},
-				{"/}", "/}}", nil},
-				{"/foo", "/{ba{{r}", Params{{"ba{r", "foo"}}},
-				{"/baz/x/}xy{{", "/baz/{xxx}/}}xy{{{{", Params{{"xxx", "x"}}},
-				{"/{/{{", "/{{/{x}", Params{{"x", "{{"}}},
+				{"/", "/", Params{}},
+				{"/{", "/{{", Params{}},
+				{"/}", "/}}", Params{}},
+				{"/foo", "/{ba{{r}", ParamsOf(Param{"ba{r", "foo"})},
+				{"/baz/x/}xy{{", "/baz/{xxx}/}}xy{{{{", ParamsOf(Param{"xxx", "x"})},
+				{"/{/{{", "/{{/{x}", ParamsOf(Param{"x", "{{"})},
 			},
 		},
 	}
@@ -170,10 +170,11 @@ func TestMatchitManyParameters(t *testing.T) {
 	if got != "many" {
 		t.Fatalf("value = %q, want many", got)
 	}
-	if len(params) != paramCount {
-		t.Fatalf("params length = %d, want %d", len(params), paramCount)
+	if params.Len() != paramCount {
+		t.Fatalf("params length = %d, want %d", params.Len(), paramCount)
 	}
-	for i, param := range params {
+	for i := 0; i < params.Len(); i++ {
+		param := params.At(i)
 		want := Param{Key: fmt.Sprintf("p%d", i), Val: fmt.Sprintf("v%d", i)}
 		if param != want {
 			t.Fatalf("params[%d] = %#v, want %#v", i, param, want)
@@ -212,7 +213,7 @@ func TestMatchIntoReusesParams(t *testing.T) {
 	var router Router[string]
 	router.Insert("/teams/{team}/members/{member}", "member")
 
-	buf := make(Params, 0, 2)
+	buf := NewParams(2)
 	got, params, ok := router.MatchInto("/teams/core/members/ana", buf)
 	if !ok {
 		t.Fatal("MatchInto did not match")
@@ -220,14 +221,61 @@ func TestMatchIntoReusesParams(t *testing.T) {
 	if got != "member" {
 		t.Fatalf("value = %q, want member", got)
 	}
-	if !paramsEqual(params, Params{{"team", "core"}, {"member", "ana"}}) {
+	if !paramsEqual(params, ParamsOf(Param{"team", "core"}, Param{"member", "ana"})) {
 		t.Fatalf("params = %#v", params)
 	}
-	if len(buf) != 0 {
-		t.Fatalf("input buffer length = %d, want 0", len(buf))
+	if buf.Len() != 0 {
+		t.Fatalf("input buffer length = %d, want 0", buf.Len())
 	}
-	if cap(params) != cap(buf) {
-		t.Fatalf("params cap = %d, want reused cap %d", cap(params), cap(buf))
+}
+
+func TestMatchIntoReusesHeapParams(t *testing.T) {
+	var router Router[string]
+	router.Insert("/{a}/{b}/{c}/{d}/{e}", "many")
+
+	buf := NewParams(5)
+	allocs := testing.AllocsPerRun(100, func() {
+		_, params, ok := router.MatchInto("/a/b/c/d/e", buf)
+		if !ok {
+			t.Fatal("MatchInto did not match")
+		}
+		if params.Len() != 5 {
+			t.Fatalf("params length = %d, want 5", params.Len())
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("allocs per MatchInto = %v, want 0", allocs)
+	}
+}
+
+func TestParamsSeq(t *testing.T) {
+	params := ParamsOf(Param{"team", "core"}, Param{"member", "ana"})
+	var got []Param
+	for key, val := range params.Seq() {
+		got = append(got, Param{Key: key, Val: val})
+	}
+	if len(got) != params.Len() {
+		t.Fatalf("seq length = %d, want %d", len(got), params.Len())
+	}
+	for i, param := range got {
+		if param != params.At(i) {
+			t.Fatalf("seq param %d = %#v, want %#v", i, param, params.At(i))
+		}
+	}
+}
+
+func TestParamsSeqStopsEarly(t *testing.T) {
+	params := ParamsOf(Param{"team", "core"}, Param{"member", "ana"})
+	var got []Param
+	for key, val := range params.Seq() {
+		got = append(got, Param{Key: key, Val: val})
+		break
+	}
+	if len(got) != 1 {
+		t.Fatalf("seq length after break = %d, want 1", len(got))
+	}
+	if got[0] != params.At(0) {
+		t.Fatalf("seq param = %#v, want %#v", got[0], params.At(0))
 	}
 }
 
@@ -257,11 +305,11 @@ type matchCase struct {
 }
 
 func paramsEqual(a, b Params) bool {
-	if len(a) != len(b) {
+	if a.Len() != b.Len() {
 		return false
 	}
-	for i := range a {
-		if a[i] != b[i] {
+	for i := 0; i < a.Len(); i++ {
+		if a.At(i) != b.At(i) {
 			return false
 		}
 	}
