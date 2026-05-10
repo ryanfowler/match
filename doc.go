@@ -1,8 +1,7 @@
 // Package match provides a small generic path router.
 //
-// A Router maps route patterns to caller-provided values and matches request
-// paths against those patterns. Routes are slash-separated paths made from
-// literal text, named parameters, and catch-all parameters.
+// A Router maps route patterns to caller-provided values and matches paths
+// against those patterns. The zero value is ready to use.
 //
 // # Route Grammar
 //
@@ -20,24 +19,30 @@
 // matches a literal }. Escaped braces may also appear inside parameter names.
 //
 // Parameter names must be non-empty. Names cannot contain /, and * is only
-// valid as the first character of a catch-all parameter.
+// valid as the first character of a catch-all parameter. Parameters and
+// catch-all parameters capture non-empty text.
 //
 // # Matching and Conflicts
 //
 // Exact literal segments are preferred over parameter segments, and catch-all
 // routes are considered after more specific segment matches.
 //
-// Insert rejects duplicate and ambiguous routes with ConflictError. For
-// example, /x/{id}/bar conflicts with /x/{name}/bar because both match the same
-// set of paths. Insert panics on invalid or conflicting routes; TryInsert
-// returns the error.
+// TryInsert returns an error for invalid, duplicate, or ambiguous routes.
+// Invalid route syntax is reported with sentinel errors such as
+// ErrInvalidParam, ErrInvalidParamSegment, and ErrInvalidCatchAll. Duplicate and
+// ambiguous routes return *ConflictError. For example, /x/{id}/bar conflicts
+// with /x/{name}/bar because both match the same set of paths. Insert panics on
+// the same errors returned by TryInsert.
 //
 // Matching returns parameters in route order. Params is an opaque value type;
 // use Len and At to iterate without allocation, Get or TryGet to look up named
 // parameters, Seq for range-over-function iteration, and AppendTo or All when a
-// []Param snapshot is needed. Match allocates parameter storage as needed after
-// a small inline buffer is exhausted, while MatchInto reuses the caller-provided
-// Params value.
+// []Param snapshot is needed. Match keeps the common case small with inline
+// parameter storage and allocates only when more storage is needed, while
+// MatchInto reuses the caller-provided Params value.
+//
+// Router is not safe for concurrent mutation. Callers that insert routes while
+// matching from other goroutines must synchronize access.
 //
 // # Examples
 //
