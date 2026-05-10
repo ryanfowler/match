@@ -179,6 +179,9 @@ for key, val := range params.Seq() {
 	_, _ = key, val
 }
 
+merged := match.Merge(params, match.ParamsOf(match.Param{Key: "source", Val: "cache"}))
+_ = merged
+
 snapshot := params.All()
 _ = snapshot
 ```

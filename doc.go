@@ -36,10 +36,11 @@
 //
 // Matching returns parameters in route order. Params is an opaque value type;
 // use Len and At to iterate without allocation, Get or TryGet to look up named
-// parameters, Seq for range-over-function iteration, and AppendTo or All when a
-// []Param snapshot is needed. Match keeps the common case small with inline
-// parameter storage and allocates only when more storage is needed, while
-// MatchInto reuses the caller-provided Params value.
+// parameters, Seq for range-over-function iteration, Merge to concatenate
+// parameter sets, and AppendTo or All when a []Param snapshot is needed. Match
+// keeps the common case small with inline parameter storage and allocates only
+// when more storage is needed, while MatchInto reuses the caller-provided Params
+// value.
 //
 // Router is not safe for concurrent mutation. Callers that insert routes while
 // matching from other goroutines must synchronize access.
