@@ -44,6 +44,54 @@ func ParamsOf(params ...Param) Params {
 	return p
 }
 
+// Merge returns a Params value containing a followed by b.
+//
+// Parameter keys are not deduplicated; when the same key appears in both
+// inputs, the returned Params contains both captures in order.
+func Merge(a, b Params) Params {
+	if b.len == 0 {
+		return a
+	}
+	if a.len == 0 {
+		return b
+	}
+
+	total := a.len + b.len
+	if a.heap != nil {
+		if cap(a.heap) < total {
+			heap := make([]Param, total)
+			copy(heap, a.heap[:a.len])
+			a.heap = heap
+		} else {
+			a.heap = a.heap[:total]
+		}
+		copyParams(a.heap[a.len:total], b)
+		a.len = total
+		return a
+	}
+
+	if total <= len(a.inline) {
+		copyParams(a.inline[a.len:total], b)
+		a.len = total
+		return a
+	}
+
+	heap := make([]Param, total)
+	copy(heap, a.inline[:a.len])
+	copyParams(heap[a.len:], b)
+	a.heap = heap
+	a.len = total
+	return a
+}
+
+func copyParams(dst []Param, src Params) {
+	if src.heap != nil {
+		copy(dst, src.heap[:src.len])
+		return
+	}
+	copy(dst, src.inline[:src.len])
+}
+
 // Len returns the number of captured parameters.
 func (p Params) Len() int {
 	return p.len

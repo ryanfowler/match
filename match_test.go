@@ -248,6 +248,87 @@ func TestMatchIntoReusesHeapParams(t *testing.T) {
 	}
 }
 
+func TestMergeParamsInline(t *testing.T) {
+	a := ParamsOf(Param{"team", "core"}, Param{"member", "ana"})
+	b := ParamsOf(Param{"role", "lead"}, Param{"team", "infra"})
+
+	got := Merge(a, b)
+	want := ParamsOf(
+		Param{"team", "core"},
+		Param{"member", "ana"},
+		Param{"role", "lead"},
+		Param{"team", "infra"},
+	)
+	if !paramsEqual(got, want) {
+		t.Fatalf("Merge params = %#v, want %#v", got.All(), want.All())
+	}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		got := Merge(a, b)
+		if got.Len() != 4 {
+			t.Fatalf("merged length = %d, want 4", got.Len())
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("allocs per inline Merge = %v, want 0", allocs)
+	}
+}
+
+func TestMergeParamsInlineToHeap(t *testing.T) {
+	a := ParamsOf(
+		Param{"a", "1"},
+		Param{"b", "2"},
+		Param{"c", "3"},
+	)
+	b := ParamsOf(Param{"d", "4"}, Param{"e", "5"})
+
+	got := Merge(a, b)
+	want := ParamsOf(
+		Param{"a", "1"},
+		Param{"b", "2"},
+		Param{"c", "3"},
+		Param{"d", "4"},
+		Param{"e", "5"},
+	)
+	if !paramsEqual(got, want) {
+		t.Fatalf("Merge params = %#v, want %#v", got.All(), want.All())
+	}
+}
+
+func TestMergeParamsReusesHeapCapacity(t *testing.T) {
+	a := NewParams(8)
+	a = a.append("a", "1")
+	a = a.append("b", "2")
+	a = a.append("c", "3")
+	a = a.append("d", "4")
+	a = a.append("e", "5")
+	b := ParamsOf(Param{"f", "6"}, Param{"g", "7"})
+
+	allocs := testing.AllocsPerRun(100, func() {
+		got := Merge(a, b)
+		if got.Len() != 7 {
+			t.Fatalf("merged length = %d, want 7", got.Len())
+		}
+		if got.At(5) != (Param{"f", "6"}) || got.At(6) != (Param{"g", "7"}) {
+			t.Fatalf("merged tail = %#v, %#v", got.At(5), got.At(6))
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("allocs per heap-capacity Merge = %v, want 0", allocs)
+	}
+}
+
+func TestMergeParamsEmpty(t *testing.T) {
+	params := ParamsOf(Param{"team", "core"})
+
+	if got := Merge(Params{}, params); !paramsEqual(got, params) {
+		t.Fatalf("Merge empty first = %#v, want %#v", got.All(), params.All())
+	}
+	if got := Merge(params, Params{}); !paramsEqual(got, params) {
+		t.Fatalf("Merge empty second = %#v, want %#v", got.All(), params.All())
+	}
+}
+
 func TestParamsSeq(t *testing.T) {
 	params := ParamsOf(Param{"team", "core"}, Param{"member", "ana"})
 	var got []Param
