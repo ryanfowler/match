@@ -135,7 +135,8 @@ func (n *node[T]) insert(route string, value T) error {
 }
 
 func (n *node[T]) match(route string) (T, Params, bool) {
-	entry, params, ok := n.root.matchPath(route, 0, Params{})
+	root, index := n.matchRoot(route)
+	entry, params, ok := root.matchPath(route, index, Params{})
 	if !ok {
 		var val T
 		return val, Params{}, false
@@ -144,12 +145,23 @@ func (n *node[T]) match(route string) (T, Params, bool) {
 }
 
 func (n *node[T]) matchInto(route string, params Params) (T, Params, bool) {
-	entry, params, ok := n.root.matchPath(route, 0, params.reset())
+	root, index := n.matchRoot(route)
+	entry, params, ok := root.matchPath(route, index, params.reset())
 	if !ok {
 		var val T
 		return val, Params{}, false
 	}
 	return entry.value, params, true
+}
+
+func (n *node[T]) matchRoot(route string) (*segmentNode[T], int) {
+	if route == "" || route[0] != '/' || len(n.root.params) != 0 || len(n.root.catchAll) != 0 {
+		return &n.root, 0
+	}
+	if child := n.root.staticChild(""); child != nil {
+		return child, 1
+	}
+	return &n.root, 0
 }
 
 func (n *node[T]) insertTree(entry *routeEntry[T]) {
@@ -292,8 +304,19 @@ func nextPathSegment(path string, index int) (string, int) {
 	if index == len(path) {
 		return "", -1
 	}
-	if i := strings.IndexByte(path[index:], '/'); i >= 0 {
-		return path[index : index+i], index + i + 1
+	end := index + 16
+	if end > len(path) {
+		end = len(path)
+	}
+	for i := index; i < end; i++ {
+		if path[i] == '/' {
+			return path[index:i], i + 1
+		}
+	}
+	if end < len(path) {
+		if i := strings.IndexByte(path[end:], '/'); i >= 0 {
+			return path[index : end+i], end + i + 1
+		}
 	}
 	return path[index:], -1
 }

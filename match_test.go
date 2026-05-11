@@ -98,6 +98,34 @@ func TestMatchitMisses(t *testing.T) {
 	}
 }
 
+func TestMatchRootCatchAllFallbackWithAbsoluteRoutes(t *testing.T) {
+	var router Router[string]
+	router.Insert("{*path}", "catch-all")
+	router.Insert("/fixed", "fixed")
+
+	got, params, ok := router.Match("/other")
+	if !ok {
+		t.Fatal("match root catch-all: not found")
+	}
+	if got != "catch-all" {
+		t.Fatalf("match root catch-all route = %q, want catch-all", got)
+	}
+	if !paramsEqual(params, ParamsOf(Param{"path", "/other"})) {
+		t.Fatalf("match root catch-all params = %#v", params)
+	}
+
+	got, params, ok = router.Match("/fixed")
+	if !ok {
+		t.Fatal("match absolute route: not found")
+	}
+	if got != "fixed" {
+		t.Fatalf("match absolute route = %q, want fixed", got)
+	}
+	if params.Len() != 0 {
+		t.Fatalf("match absolute params length = %d, want 0", params.Len())
+	}
+}
+
 func TestMatchitInsertErrors(t *testing.T) {
 	tests := []struct {
 		name  string
