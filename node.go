@@ -532,9 +532,6 @@ func findParamEnd(route string, start int) (int, error) {
 			}
 			continue
 		}
-		if route[i] == '*' && i != start {
-			return 0, ErrInvalidParam
-		}
 	}
 	return 0, ErrInvalidParam
 }
