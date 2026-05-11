@@ -589,7 +589,7 @@ func hasCatchAllPrefixConflict(a, b []token) bool {
 			return false
 		}
 		prefix := literalPrefix(a[:i])
-		return strings.HasPrefix(possibleLiteralPrefix(b), prefix)
+		return strings.HasPrefix(literalPrefix(b), prefix)
 	}
 	return false
 }
@@ -604,17 +604,6 @@ func hasParamToken(tokens []token) bool {
 }
 
 func literalPrefix(tokens []token) string {
-	var b strings.Builder
-	for _, t := range tokens {
-		if t.kind != tokenLiteral {
-			break
-		}
-		b.WriteString(t.text)
-	}
-	return b.String()
-}
-
-func possibleLiteralPrefix(tokens []token) string {
 	var b strings.Builder
 	for _, t := range tokens {
 		if t.kind != tokenLiteral {
