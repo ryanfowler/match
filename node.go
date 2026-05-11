@@ -80,7 +80,7 @@ type staticEdge[T any] struct {
 
 type paramEdge[T any] struct {
 	pattern segmentPattern
-	tokens  []token
+	param   token
 	child   *segmentNode[T]
 }
 
@@ -185,7 +185,7 @@ func (n *node[T]) insertTree(entry *routeEntry[T]) {
 				child = &segmentNode[T]{}
 				current.params = append(current.params, paramEdge[T]{
 					pattern: pattern,
-					tokens:  segment,
+					param:   paramToken(segment),
 					child:   child,
 				})
 				sortParamEdges(current.params)
@@ -215,7 +215,7 @@ func (n *segmentNode[T]) matchPath(path string, index int, params Params) (*rout
 	}
 
 	for i := range n.params {
-		nextParams, ok := matchSegmentTokens(n.params[i].tokens, segment, params)
+		nextParams, ok := matchParamEdge(n.params[i], segment, params)
 		if !ok {
 			continue
 		}
@@ -352,6 +352,15 @@ func catchAllToken(tokens []token) token {
 	return token{}
 }
 
+func paramToken(tokens []token) token {
+	for _, t := range tokens {
+		if t.kind == tokenParam {
+			return t
+		}
+	}
+	return token{}
+}
+
 func sameSegmentPattern(a, b segmentPattern) bool {
 	return a.raw == b.raw &&
 		a.literal == b.literal &&
@@ -378,36 +387,18 @@ func paramEdgeLess[T any](a, b paramEdge[T]) bool {
 	return len(a.pattern.prefix) > len(b.pattern.prefix)
 }
 
-func matchSegmentTokens(tokens []token, segment string, params Params) (Params, bool) {
-	return matchSegmentFrom(tokens, 0, segment, 0, params)
-}
-
-func matchSegmentFrom(tokens []token, ti int, segment string, si int, params Params) (Params, bool) {
-	if ti == len(tokens) {
-		if si == len(segment) {
-			return params, true
-		}
+func matchParamEdge[T any](edge paramEdge[T], segment string, params Params) (Params, bool) {
+	pattern := edge.pattern
+	if !strings.HasPrefix(segment, pattern.prefix) || !strings.HasSuffix(segment, pattern.suffix) {
 		return Params{}, false
 	}
 
-	t := tokens[ti]
-	switch t.kind {
-	case tokenLiteral:
-		if !strings.HasPrefix(segment[si:], t.text) {
-			return Params{}, false
-		}
-		return matchSegmentFrom(tokens, ti+1, segment, si+len(t.text), params)
-	case tokenParam:
-		for end := len(segment); end > si; end-- {
-			next := params.append(t.text, segment[si:end])
-			if got, ok := matchSegmentFrom(tokens, ti+1, segment, end, next); ok {
-				return got, true
-			}
-		}
-		return Params{}, false
-	default:
+	valueStart := len(pattern.prefix)
+	valueEnd := len(segment) - len(pattern.suffix)
+	if valueEnd <= valueStart {
 		return Params{}, false
 	}
+	return params.append(edge.param.text, segment[valueStart:valueEnd]), true
 }
 
 func matchCatchAll[T any](edge catchAllEdge[T], rest string, params Params) (Params, bool) {
@@ -537,16 +528,23 @@ func findParamEnd(route string, start int) (int, error) {
 }
 
 func unescapeBraces(s string) string {
-	var b strings.Builder
 	for i := 0; i < len(s); i++ {
 		if i+1 < len(s) && ((s[i] == '{' && s[i+1] == '{') || (s[i] == '}' && s[i+1] == '}')) {
-			b.WriteByte(s[i])
-			i++
-			continue
+			var b strings.Builder
+			b.Grow(len(s) - 1)
+			b.WriteString(s[:i])
+			for ; i < len(s); i++ {
+				if i+1 < len(s) && ((s[i] == '{' && s[i+1] == '{') || (s[i] == '}' && s[i+1] == '}')) {
+					b.WriteByte(s[i])
+					i++
+					continue
+				}
+				b.WriteByte(s[i])
+			}
+			return b.String()
 		}
-		b.WriteByte(s[i])
 	}
-	return b.String()
+	return s
 }
 
 func conflictsEntries[T any](a, b routeEntry[T]) bool {
