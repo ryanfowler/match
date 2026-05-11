@@ -292,10 +292,8 @@ func nextPathSegment(path string, index int) (string, int) {
 	if index == len(path) {
 		return "", -1
 	}
-	for i := index; i < len(path); i++ {
-		if path[i] == '/' {
-			return path[index:i], i + 1
-		}
+	if i := strings.IndexByte(path[index:], '/'); i >= 0 {
+		return path[index : index+i], index + i + 1
 	}
 	return path[index:], -1
 }
