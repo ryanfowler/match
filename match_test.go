@@ -98,6 +98,30 @@ func TestMatchitMisses(t *testing.T) {
 	}
 }
 
+func TestMatchitDivergentParamRoutesKeepParamNames(t *testing.T) {
+	var router Router[string]
+	if err := router.TryInsert("/{id}/foo", "foo"); err != nil {
+		t.Fatalf("insert id route: %v", err)
+	}
+	if err := router.TryInsert("/{name}/bar", "bar"); err != nil {
+		t.Fatalf("insert name route: %v", err)
+	}
+
+	got, params, ok := router.Match("/abc/bar")
+	if !ok {
+		t.Fatal("match /abc/bar: not found")
+	}
+	if got != "bar" {
+		t.Fatalf("value = %q, want bar", got)
+	}
+	if params.Get("id") != "" {
+		t.Fatalf("Param(id) = %q, want empty", params.Get("id"))
+	}
+	if params.Get("name") != "abc" {
+		t.Fatalf("Param(name) = %q, want abc", params.Get("name"))
+	}
+}
+
 func TestMatchRootCatchAllFallbackWithAbsoluteRoutes(t *testing.T) {
 	var router Router[string]
 	router.Insert("{*path}", "catch-all")
