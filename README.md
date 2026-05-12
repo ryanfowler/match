@@ -1,11 +1,11 @@
 # match
 
-`match` is a small generic path router for Go. It maps route patterns to values
-you provide, then returns the matched value plus any captured path parameters.
+`match` is a small generic path router for Go. It maps path patterns to values
+you provide, then returns the matched value and any captured parameters.
 
 It is useful when you want routing behavior without pulling in a full HTTP
 framework: command dispatch, API route lookup, asset path handling, or any other
-place where slash-separated paths need to resolve to typed application data.
+place where slash-separated strings need to resolve to typed application data.
 
 ## Install
 
@@ -43,8 +43,7 @@ func main() {
 }
 ```
 
-The router's zero value is ready to use. Store whatever value type is useful for
-your application:
+The router's zero value is ready to use. The value can be any Go type:
 
 ```go
 type Handler struct {
@@ -72,7 +71,8 @@ if err := router.TryInsert("/users/{id}", "user"); err != nil {
 }
 ```
 
-Use `Match` to look up a path:
+Use `Match` to look up a path. The path is matched exactly as provided; `match`
+does not clean paths, decode escapes, or add a leading slash:
 
 ```go
 value, params, ok := router.Match("/users/42")
@@ -88,13 +88,15 @@ value, params, ok := router.MatchInto("/users/42", buf)
 _, _, _ = value, params, ok
 ```
 
-`Router` is not safe for concurrent mutation. If routes are inserted while other
-goroutines are matching, synchronize access around the router.
+After routes are registered, a router may be used by multiple goroutines for
+matching. If routes are inserted while other goroutines are using the router,
+synchronize access around the router.
 
 ## Route Grammar
 
-Routes are slash-separated paths made from literal text, named parameters, and
-catch-all parameters.
+Routes are slash-separated patterns made from literal text, named parameters,
+and catch-all parameters. A route does not have to start with `/`, but most HTTP
+path-style routes do.
 
 | Syntax | Meaning |
 | --- | --- |
@@ -121,7 +123,8 @@ err := router.TryInsert("/{first}-{second}", value)
 // errors.Is(err, match.ErrInvalidParamSegment) == true
 ```
 
-Catch-all parameters can include a literal prefix in the final segment:
+Catch-all parameters can include a literal prefix in the final segment. The
+captured value starts after that prefix:
 
 ```go
 router.Insert("/static/prefix-{*path}", value)
@@ -133,8 +136,9 @@ _, params, ok := router.Match("/static/prefix-css/site.css")
 
 ## Matching Behavior
 
-Literal segments are preferred over parameter segments, and catch-all routes are
-considered after more specific segment matches.
+When more than one route could match, `match` chooses the most specific route:
+literal segments beat parameter segments, parameter segments with more literal
+text are tried first, and catch-all routes are considered last.
 
 ```go
 router.Insert("/posts/{year}/{slug}", "post")
@@ -144,7 +148,7 @@ value, _, _ := router.Match("/posts/2026/index")
 // value == "index"
 ```
 
-Parameters are returned in route order:
+Parameters are returned in the order they appear in the matched route:
 
 ```go
 router.Insert("/teams/{team}/members/{member}", "member")
@@ -158,7 +162,7 @@ params.At(1) // match.Param{Key: "member", Val: "ana"}
 ## Working With Params
 
 `Params` is an opaque value type. Use its methods instead of depending on its
-internal representation.
+internal representation:
 
 ```go
 value, params, ok := router.Match("/posts/2026/route-grammar")
@@ -186,9 +190,8 @@ snapshot := params.All()
 _ = snapshot
 ```
 
-`Match` keeps the common case small with inline parameter storage and allocates
-only when more storage is needed. `MatchInto` lets callers reuse a `Params`
-buffer across matches:
+`Match` stores up to four parameters inline and allocates only when more storage
+is needed. `MatchInto` lets callers reuse a `Params` buffer across matches:
 
 ```go
 params := match.NewParams(8)
@@ -202,7 +205,8 @@ for _, path := range paths {
 ## Insert Errors and Conflicts
 
 `TryInsert` returns an error when a route is invalid, duplicated, or ambiguous.
-`Insert` panics on those same errors.
+`Insert` panics on those same errors, which is convenient for hard-coded route
+tables that should fail during startup.
 
 Invalid route syntax is reported with sentinel errors:
 
@@ -227,8 +231,8 @@ if errors.As(err, &conflict) {
 }
 ```
 
-Ambiguous dynamic routes also conflict when the same path could select either
-route, such as `/user_{name}` and `/user_{id}`.
+Dynamic routes also conflict when the same path could select either route, such
+as `/user_{name}` and `/user_{id}`.
 
 ## Development
 
