@@ -17,7 +17,7 @@ const inlineParams = 4
 //
 // Params is an opaque value type. Use Len and At to inspect captures without
 // allocation, Get or TryGet to look up a named capture, and AppendTo or All
-// when a []Param snapshot is needed.
+// when a []Param snapshot is needed. Up to four captures are stored inline.
 type Params struct {
 	len    int
 	inline [inlineParams]Param
@@ -27,7 +27,8 @@ type Params struct {
 // NewParams returns an empty Params value with room for capacity parameters.
 //
 // It is most useful with Router.MatchInto when callers want to reuse storage
-// across matches.
+// across matches. Capacity values of four or less use the inline storage built
+// into Params.
 func NewParams(capacity int) Params {
 	if capacity <= inlineParams {
 		return Params{}
