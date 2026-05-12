@@ -187,8 +187,10 @@ func (n *node[T]) insertTree(entry *routeEntry[T]) {
 			current = child
 		} else {
 			var child *segmentNode[T]
+			param := paramToken(segment)
 			for j := range current.params {
-				if sameSegmentPattern(current.params[j].pattern, pattern) {
+				if sameSegmentPattern(current.params[j].pattern, pattern) &&
+					current.params[j].param.text == param.text {
 					child = current.params[j].child
 					break
 				}
@@ -197,7 +199,7 @@ func (n *node[T]) insertTree(entry *routeEntry[T]) {
 				child = &segmentNode[T]{}
 				current.params = append(current.params, paramEdge[T]{
 					pattern: pattern,
-					param:   paramToken(segment),
+					param:   param,
 					child:   child,
 				})
 				sortParamEdges(current.params)
@@ -232,7 +234,20 @@ func (n *segmentNode[T]) matchPath(path string, index int, params Params) (*rout
 			continue
 		}
 		if entry, gotParams, ok := n.params[i].child.matchPath(path, next, nextParams); ok {
-			return entry, gotParams, true
+			bestEntry := entry
+			bestParams := gotParams
+			for j := i + 1; j < len(n.params); j++ {
+				nextParams, ok := matchParamEdge(n.params[j], segment, params)
+				if !ok {
+					continue
+				}
+				entry, gotParams, ok := n.params[j].child.matchPath(path, next, nextParams)
+				if ok && moreSpecificRoute(entry, bestEntry) {
+					bestEntry = entry
+					bestParams = gotParams
+				}
+			}
+			return bestEntry, bestParams, true
 		}
 	}
 
@@ -243,6 +258,31 @@ func (n *segmentNode[T]) matchPath(path string, index int, params Params) (*rout
 	}
 
 	return nil, Params{}, false
+}
+
+func moreSpecificRoute[T any](a, b *routeEntry[T]) bool {
+	for i := 0; i < len(a.segments) && i < len(b.segments); i++ {
+		ap := makeSegment(a.segments[i])
+		bp := makeSegment(b.segments[i])
+		if ap.literal != bp.literal {
+			return ap.literal
+		}
+		if ap.catchAll != bp.catchAll {
+			return bp.catchAll
+		}
+		if ap.literal || ap.catchAll {
+			continue
+		}
+		aStatic := len(ap.prefix) + len(ap.suffix)
+		bStatic := len(bp.prefix) + len(bp.suffix)
+		if aStatic != bStatic {
+			return aStatic > bStatic
+		}
+		if len(ap.prefix) != len(bp.prefix) {
+			return len(ap.prefix) > len(bp.prefix)
+		}
+	}
+	return len(a.segments) > len(b.segments)
 }
 
 func (n *segmentNode[T]) staticChild(segment string) *segmentNode[T] {
