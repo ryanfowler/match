@@ -146,12 +146,13 @@ func (n *node[T]) match(route string) (T, Params, bool) {
 
 func (n *node[T]) matchInto(route string, params Params) (T, Params, bool) {
 	root, index := n.matchRoot(route)
-	entry, params, ok := root.matchPath(route, index, params.reset())
+	params = params.reset()
+	entry, gotParams, ok := root.matchPath(route, index, params)
 	if !ok {
 		var val T
-		return val, Params{}, false
+		return val, params, false
 	}
-	return entry.value, params, true
+	return entry.value, gotParams, true
 }
 
 func (n *node[T]) matchRoot(route string) (*segmentNode[T], int) {
@@ -167,7 +168,12 @@ func (n *node[T]) matchRoot(route string) (*segmentNode[T], int) {
 func (n *node[T]) insertTree(entry *routeEntry[T]) {
 	current := &n.root
 	for i, segment := range entry.segments {
-		pattern := makeSegment(segment)
+		var pattern segmentPattern
+		if entry.dynamic {
+			pattern = entry.patterns[i]
+		} else {
+			pattern = makeSegment(segment)
+		}
 
 		if pattern.catchAll {
 			current.catchAll = append(current.catchAll, catchAllEdge[T]{
@@ -262,8 +268,8 @@ func (n *segmentNode[T]) matchPath(path string, index int, params Params) (*rout
 
 func moreSpecificRoute[T any](a, b *routeEntry[T]) bool {
 	for i := 0; i < len(a.segments) && i < len(b.segments); i++ {
-		ap := makeSegment(a.segments[i])
-		bp := makeSegment(b.segments[i])
+		ap := a.patterns[i]
+		bp := b.patterns[i]
 		if ap.literal != bp.literal {
 			return ap.literal
 		}

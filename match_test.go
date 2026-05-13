@@ -300,6 +300,36 @@ func TestMatchIntoReusesHeapParams(t *testing.T) {
 	}
 }
 
+func TestMatchIntoMissPreservesHeapParams(t *testing.T) {
+	var router Router[string]
+	router.Insert("/{a}/{b}/{c}/{d}/{e}", "many")
+
+	buf := NewParams(5)
+	_, params, ok := router.MatchInto("/miss", buf)
+	if ok {
+		t.Fatal("MatchInto matched unexpected path")
+	}
+	if params.Len() != 0 {
+		t.Fatalf("miss params length = %d, want 0", params.Len())
+	}
+	if params.heap == nil || cap(params.heap) < 5 {
+		t.Fatalf("miss params heap capacity = %d, want at least 5", cap(params.heap))
+	}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		_, matchedParams, ok := router.MatchInto("/a/b/c/d/e", params)
+		if !ok {
+			t.Fatal("MatchInto did not match")
+		}
+		if matchedParams.Len() != 5 {
+			t.Fatalf("params length = %d, want 5", matchedParams.Len())
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("allocs per MatchInto after miss = %v, want 0", allocs)
+	}
+}
+
 func TestMergeParamsInline(t *testing.T) {
 	a := ParamsOf(Param{"team", "core"}, Param{"member", "ana"})
 	b := ParamsOf(Param{"role", "lead"}, Param{"team", "infra"})

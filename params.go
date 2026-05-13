@@ -118,7 +118,7 @@ func (p Params) at(i int) Param {
 // AppendTo appends the captured parameters to dst and returns the extended slice.
 func (p Params) AppendTo(dst []Param) []Param {
 	if p.heap != nil {
-		return append(dst, p.heap...)
+		return append(dst, p.heap[:p.len]...)
 	}
 	return append(dst, p.inline[:p.len]...)
 }
