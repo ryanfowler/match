@@ -150,6 +150,121 @@ func TestMatchRootCatchAllFallbackWithAbsoluteRoutes(t *testing.T) {
 	}
 }
 
+func TestMatchExactRouteShapes(t *testing.T) {
+	tests := []struct {
+		name  string
+		route string
+		path  string
+	}{
+		{"empty route", "", ""},
+		{"relative route", "relative/{id}", "relative/42"},
+		{"empty middle segment", "/a//b", "/a//b"},
+		{"trailing slash", "/a/", "/a/"},
+		{"long segment", "/aaaaaaaaaaaaaaaaa/{id}", "/aaaaaaaaaaaaaaaaa/42"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var router Router[string]
+			router.Insert(tt.route, tt.route)
+
+			got, _, ok := router.Match(tt.path)
+			if !ok {
+				t.Fatalf("match %q: not found", tt.path)
+			}
+			if got != tt.route {
+				t.Fatalf("match %q route = %q, want %q", tt.path, got, tt.route)
+			}
+		})
+	}
+}
+
+func TestMatchExactRouteShapeMisses(t *testing.T) {
+	var router Router[string]
+	router.Insert("", "empty")
+	router.Insert("relative", "relative")
+	router.Insert("/a//b", "empty-segment")
+	router.Insert("/a/", "trailing")
+
+	for _, path := range []string{"/", "/relative", "relative/", "/a/b", "/a"} {
+		if got, _, ok := router.Match(path); ok {
+			t.Fatalf("match %q = %q, want miss", path, got)
+		}
+	}
+}
+
+func TestMatchStaticChildrenAfterIndexThreshold(t *testing.T) {
+	var router Router[string]
+	for i := 0; i < 12; i++ {
+		route := fmt.Sprintf("/static-%02d", i)
+		router.Insert(route, route)
+	}
+
+	got, params, ok := router.Match("/static-11")
+	if !ok {
+		t.Fatal("match indexed static child: not found")
+	}
+	if got != "/static-11" {
+		t.Fatalf("route = %q, want /static-11", got)
+	}
+	if params.Len() != 0 {
+		t.Fatalf("params length = %d, want 0", params.Len())
+	}
+}
+
+func TestMatchPrefixedCatchAll(t *testing.T) {
+	var router Router[string]
+	router.Insert("/static/prefix-{*path}", "catch-all")
+	router.Insert("/static/prefix-file", "static")
+
+	tests := []matchCase{
+		{"/static/prefix-file", "static", Params{}},
+		{"/static/prefix-assets/app.css", "catch-all", ParamsOf(Param{"path", "assets/app.css"})},
+	}
+
+	for _, tt := range tests {
+		got, params, ok := router.Match(tt.path)
+		if !ok {
+			t.Fatalf("match %q: not found", tt.path)
+		}
+		if got != tt.route {
+			t.Fatalf("match %q route = %q, want %q", tt.path, got, tt.route)
+		}
+		if !paramsEqual(params, tt.params) {
+			t.Fatalf("match %q params = %#v, want %#v", tt.path, params.All(), tt.params.All())
+		}
+	}
+
+	for _, path := range []string{"/static/prefix-", "/static/other"} {
+		if got, _, ok := router.Match(path); ok {
+			t.Fatalf("match %q = %q, want miss", path, got)
+		}
+	}
+}
+
+func TestMatchChoosesMoreSpecificParamRoute(t *testing.T) {
+	for _, routes := range [][]string{
+		{"/{id}/view", "/user-{id}/view"},
+		{"/user-{id}/view", "/{id}/view"},
+	} {
+		var router Router[string]
+		for _, route := range routes {
+			router.Insert(route, route)
+		}
+
+		got, params, ok := router.Match("/user-42/view")
+		if !ok {
+			t.Fatal("match specific param route: not found")
+		}
+		if got != "/user-{id}/view" {
+			t.Fatalf("route = %q, want /user-{id}/view", got)
+		}
+		if !paramsEqual(params, ParamsOf(Param{"id", "42"})) {
+			t.Fatalf("params = %#v, want id=42", params.All())
+		}
+	}
+}
+
 func TestMatchitInsertErrors(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -160,8 +275,11 @@ func TestMatchitInsertErrors(t *testing.T) {
 		{"unnamed catchall", "/src/{*}", ErrInvalidParam},
 		{"double params", "/{foo}{bar}", ErrInvalidParamSegment},
 		{"catchall suffix", "/src/{*filepath}x", ErrInvalidCatchAll},
+		{"catchall before slash", "/src/{*filepath}/extra", ErrInvalidCatchAll},
 		{"unmatched open", "x{y", ErrInvalidParam},
 		{"unmatched close", "x}", ErrInvalidParam},
+		{"slash in param", "/{foo/bar}", ErrInvalidParam},
+		{"star in param name", "/{foo*bar}", ErrInvalidParam},
 	}
 
 	for _, tt := range tests {
@@ -175,6 +293,19 @@ func TestMatchitInsertErrors(t *testing.T) {
 	}
 }
 
+func TestInsertPanicsOnInvalidRoute(t *testing.T) {
+	defer func() {
+		r := recover()
+		err, ok := r.(error)
+		if !ok || !errors.Is(err, ErrInvalidParam) {
+			t.Fatalf("panic = %v, want ErrInvalidParam", r)
+		}
+	}()
+
+	var router Router[string]
+	router.Insert("/{}", "invalid")
+}
+
 func TestMatchitConflicts(t *testing.T) {
 	tests := []struct {
 		first  string
@@ -183,7 +314,9 @@ func TestMatchitConflicts(t *testing.T) {
 		{"/", "/"},
 		{"/x/{foo}/bar", "/x/{bar}/bar"},
 		{"/src/{*filepath}", "/src/{file}"},
+		{"/static/prefix-{*path}", "/static/{file}"},
 		{"/user_{name}", "/user_{bar}"},
+		{"/files/{name}.json", "/files/report.{ext}"},
 	}
 
 	for _, tt := range tests {
@@ -201,6 +334,56 @@ func TestMatchitConflicts(t *testing.T) {
 		if conflict.Route != tt.second {
 			t.Fatalf("conflict route = %q, want %q", conflict.Route, tt.second)
 		}
+	}
+}
+
+func TestConflictErrorString(t *testing.T) {
+	err := &ConflictError{Route: "/new", With: "/existing"}
+	want := "insertion failed due to conflict with previously registered route: /existing"
+	if err.Error() != want {
+		t.Fatalf("Error() = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestNonConflictingDynamicAffixes(t *testing.T) {
+	var router Router[string]
+	router.Insert("/files/{name}.json", "json")
+	router.Insert("/files/{name}.xml", "xml")
+
+	tests := []matchCase{
+		{"/files/report.json", "json", ParamsOf(Param{"name", "report"})},
+		{"/files/report.xml", "xml", ParamsOf(Param{"name", "report"})},
+	}
+
+	for _, tt := range tests {
+		got, params, ok := router.Match(tt.path)
+		if !ok {
+			t.Fatalf("match %q: not found", tt.path)
+		}
+		if got != tt.route {
+			t.Fatalf("match %q route = %q, want %q", tt.path, got, tt.route)
+		}
+		if !paramsEqual(params, tt.params) {
+			t.Fatalf("match %q params = %#v, want %#v", tt.path, params.All(), tt.params.All())
+		}
+	}
+}
+
+func TestConflictWithEscapedParamNames(t *testing.T) {
+	var router Router[string]
+	if err := router.TryInsert("/{ba{{r}", "first"); err != nil {
+		t.Fatalf("insert escaped param route: %v", err)
+	}
+
+	var conflict *ConflictError
+	if err := router.TryInsert("/{other}", "second"); !errors.As(err, &conflict) {
+		t.Fatalf("insert conflicting param route error = %v, want conflict", err)
+	}
+	if conflict.With != "/{ba{r}" {
+		t.Fatalf("conflict with = %q, want /{ba{r}", conflict.With)
+	}
+	if conflict.Route != "/{other}" {
+		t.Fatalf("conflict route = %q, want /{other}", conflict.Route)
 	}
 }
 
@@ -261,6 +444,22 @@ func TestMatchitHighParameterOrdinalDoesNotCollideWithLiteral(t *testing.T) {
 	}
 }
 
+func TestMatchMissReturnsZeroValueAndEmptyParams(t *testing.T) {
+	var router Router[int]
+	router.Insert("/found/{id}", 42)
+
+	got, params, ok := router.Match("/missing")
+	if ok {
+		t.Fatal("Match matched unexpected path")
+	}
+	if got != 0 {
+		t.Fatalf("value = %d, want zero", got)
+	}
+	if params.Len() != 0 {
+		t.Fatalf("params length = %d, want 0", params.Len())
+	}
+}
+
 func TestMatchIntoReusesParams(t *testing.T) {
 	var router Router[string]
 	router.Insert("/teams/{team}/members/{member}", "member")
@@ -278,6 +477,20 @@ func TestMatchIntoReusesParams(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Fatalf("input buffer length = %d, want 0", buf.Len())
+	}
+}
+
+func TestMatchIntoMissResetsInlineParams(t *testing.T) {
+	var router Router[string]
+	router.Insert("/{team}/{member}", "member")
+
+	buf := ParamsOf(Param{"stale", "value"})
+	_, params, ok := router.MatchInto("/missing", buf)
+	if ok {
+		t.Fatal("MatchInto matched unexpected path")
+	}
+	if params.Len() != 0 {
+		t.Fatalf("miss params length = %d, want 0", params.Len())
 	}
 }
 
@@ -327,6 +540,84 @@ func TestMatchIntoMissPreservesHeapParams(t *testing.T) {
 	})
 	if allocs != 0 {
 		t.Fatalf("allocs per MatchInto after miss = %v, want 0", allocs)
+	}
+}
+
+func TestParamsAccessors(t *testing.T) {
+	params := ParamsOf(Param{"empty", ""}, Param{"team", "core"}, Param{"team", "infra"})
+
+	if got := params.Get("missing"); got != "" {
+		t.Fatalf("Get missing = %q, want empty", got)
+	}
+	if got := params.Get("empty"); got != "" {
+		t.Fatalf("Get empty = %q, want empty", got)
+	}
+	if got, ok := params.TryGet("empty"); !ok || got != "" {
+		t.Fatalf("TryGet empty = %q, %v, want empty true", got, ok)
+	}
+	if got, ok := params.TryGet("team"); !ok || got != "core" {
+		t.Fatalf("TryGet duplicate = %q, %v, want core true", got, ok)
+	}
+	if got, ok := params.TryGet("missing"); ok || got != "" {
+		t.Fatalf("TryGet missing = %q, %v, want empty false", got, ok)
+	}
+}
+
+func TestParamsAtPanicsOutOfRange(t *testing.T) {
+	params := ParamsOf(Param{"team", "core"})
+	for _, index := range []int{-1, 1} {
+		t.Run(fmt.Sprintf("index %d", index), func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Fatal("At did not panic")
+				}
+			}()
+			_ = params.At(index)
+		})
+	}
+}
+
+func TestParamsAppendToPreservesPrefix(t *testing.T) {
+	params := ParamsOf(Param{"team", "core"}, Param{"member", "ana"})
+	dst := []Param{{Key: "prefix", Val: "keep"}}
+
+	got := params.AppendTo(dst)
+	want := []Param{
+		{Key: "prefix", Val: "keep"},
+		{Key: "team", Val: "core"},
+		{Key: "member", Val: "ana"},
+	}
+	if !paramSlicesEqual(got, want) {
+		t.Fatalf("AppendTo = %#v, want %#v", got, want)
+	}
+}
+
+func TestParamsAppendToHeapAndAllSnapshot(t *testing.T) {
+	params := ParamsOf(
+		Param{"a", "1"},
+		Param{"b", "2"},
+		Param{"c", "3"},
+		Param{"d", "4"},
+		Param{"e", "5"},
+	)
+
+	got := params.AppendTo([]Param{{Key: "prefix", Val: "keep"}})
+	want := []Param{
+		{Key: "prefix", Val: "keep"},
+		{Key: "a", Val: "1"},
+		{Key: "b", Val: "2"},
+		{Key: "c", Val: "3"},
+		{Key: "d", Val: "4"},
+		{Key: "e", Val: "5"},
+	}
+	if !paramSlicesEqual(got, want) {
+		t.Fatalf("AppendTo heap = %#v, want %#v", got, want)
+	}
+
+	all := params.All()
+	all[0] = Param{Key: "changed", Val: "changed"}
+	if params.At(0) != (Param{Key: "a", Val: "1"}) {
+		t.Fatalf("All did not return a snapshot; params[0] = %#v", params.At(0))
 	}
 }
 
@@ -397,6 +688,57 @@ func TestMergeParamsReusesHeapCapacity(t *testing.T) {
 	})
 	if allocs != 0 {
 		t.Fatalf("allocs per heap-capacity Merge = %v, want 0", allocs)
+	}
+}
+
+func TestMergeParamsGrowsHeap(t *testing.T) {
+	a := NewParams(5)
+	for _, param := range []Param{
+		{"a", "1"},
+		{"b", "2"},
+		{"c", "3"},
+		{"d", "4"},
+		{"e", "5"},
+	} {
+		a = a.append(param.Key, param.Val)
+	}
+	b := ParamsOf(Param{"f", "6"})
+
+	got := Merge(a, b)
+	want := ParamsOf(
+		Param{"a", "1"},
+		Param{"b", "2"},
+		Param{"c", "3"},
+		Param{"d", "4"},
+		Param{"e", "5"},
+		Param{"f", "6"},
+	)
+	if !paramsEqual(got, want) {
+		t.Fatalf("Merge grown heap = %#v, want %#v", got.All(), want.All())
+	}
+}
+
+func TestMergeParamsCopiesHeapSecond(t *testing.T) {
+	a := ParamsOf(Param{"a", "1"})
+	b := ParamsOf(
+		Param{"b", "2"},
+		Param{"c", "3"},
+		Param{"d", "4"},
+		Param{"e", "5"},
+		Param{"f", "6"},
+	)
+
+	got := Merge(a, b)
+	want := ParamsOf(
+		Param{"a", "1"},
+		Param{"b", "2"},
+		Param{"c", "3"},
+		Param{"d", "4"},
+		Param{"e", "5"},
+		Param{"f", "6"},
+	)
+	if !paramsEqual(got, want) {
+		t.Fatalf("Merge heap second = %#v, want %#v", got.All(), want.All())
 	}
 }
 
@@ -473,6 +815,18 @@ func paramsEqual(a, b Params) bool {
 	}
 	for i := 0; i < a.Len(); i++ {
 		if a.At(i) != b.At(i) {
+			return false
+		}
+	}
+	return true
+}
+
+func paramSlicesEqual(a, b []Param) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
 			return false
 		}
 	}
