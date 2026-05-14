@@ -9,6 +9,16 @@ type Router[T any] struct {
 	root node[T]
 }
 
+// PrefixMatch contains the result of a successful prefix match.
+//
+// Rest is the remaining path after the matched prefix. It is always "/" when
+// the match consumes the full path.
+type PrefixMatch[T any] struct {
+	Value  T
+	Params Params
+	Rest   string
+}
+
 // Insert registers route with value.
 //
 // It panics with the same errors returned by TryInsert when route is invalid or
@@ -42,4 +52,23 @@ func (r *Router[T]) Match(path string) (T, Params, bool) {
 // reusable Params buffer large enough for the expected number of captures.
 func (r *Router[T]) MatchInto(path string, params Params) (T, Params, bool) {
 	return r.root.matchInto(path, params)
+}
+
+// MatchPrefix returns the value, parameters, and remaining path for the best
+// registered route that matches the front of path.
+//
+// The boolean result is false when no registered route matches a whole-segment
+// prefix of path. When multiple routes match, the route that consumes the most
+// path wins. A route registered as "/" matches the root prefix of any absolute
+// path.
+func (r *Router[T]) MatchPrefix(path string) (PrefixMatch[T], bool) {
+	return r.root.matchPrefix(path)
+}
+
+// MatchPrefixInto is like MatchPrefix, but uses params as parameter storage.
+//
+// The input Params value is reset before matching. Use NewParams to create a
+// reusable Params buffer large enough for the expected number of captures.
+func (r *Router[T]) MatchPrefixInto(path string, params Params) (PrefixMatch[T], bool) {
+	return r.root.matchPrefixInto(path, params)
 }
