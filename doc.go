@@ -46,7 +46,9 @@
 // parameters, Seq for range-over-function iteration, Merge to concatenate
 // parameter sets, and AppendTo or All when a []Param snapshot is needed. Match
 // stores up to four parameters inline and allocates only when more storage is
-// needed, while MatchInto reuses the caller-provided Params value.
+// needed, while MatchInto reuses the caller-provided Params value. MatchPrefix
+// and MatchPrefixInto return the best whole-segment route prefix plus the
+// remaining path, which is useful for mounts and nested dispatch.
 //
 // After routes are registered, a Router may be used by multiple goroutines for
 // matching. Callers that insert routes while other goroutines use the router

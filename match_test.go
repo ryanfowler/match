@@ -543,6 +543,265 @@ func TestMatchIntoMissPreservesHeapParams(t *testing.T) {
 	}
 }
 
+func TestMatchIntoHeapParamsSurviveBacktracking(t *testing.T) {
+	t.Run("failed later branch", func(t *testing.T) {
+		var router Router[string]
+		router.Insert("/{id}", "id")
+		router.Insert("/{name}/bar", "bar")
+
+		got, params, ok := router.MatchInto("/abc", NewParams(5))
+		if !ok {
+			t.Fatal("MatchInto did not match")
+		}
+		if got != "id" {
+			t.Fatalf("value = %q, want id", got)
+		}
+		if !paramsEqual(params, ParamsOf(Param{"id", "abc"})) {
+			t.Fatalf("params = %#v, want id=abc", params.All())
+		}
+	})
+
+	t.Run("less specific later branch", func(t *testing.T) {
+		var router Router[string]
+		router.Insert("/user-{id}/view", "specific")
+		router.Insert("/{id}/view", "generic")
+
+		got, params, ok := router.MatchInto("/user-42/view", NewParams(5))
+		if !ok {
+			t.Fatal("MatchInto did not match")
+		}
+		if got != "specific" {
+			t.Fatalf("value = %q, want specific", got)
+		}
+		if !paramsEqual(params, ParamsOf(Param{"id", "42"})) {
+			t.Fatalf("params = %#v, want id=42", params.All())
+		}
+	})
+}
+
+func TestMatchPrefixMatchesRootPrefix(t *testing.T) {
+	var router Router[string]
+	router.Insert("/", "root")
+	router.Insert("/api", "api")
+
+	tests := []struct {
+		path string
+		want string
+		rest string
+	}{
+		{"/", "root", "/"},
+		{"/users/42", "root", "/users/42"},
+		{"//users/42", "root", "/users/42"},
+		{"/api", "api", "/"},
+		{"/api/", "api", "/"},
+		{"/api/users", "api", "/users"},
+		{"/api//users", "api", "/users"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got, ok := router.MatchPrefix(tt.path)
+			if !ok {
+				t.Fatalf("MatchPrefix(%q): not found", tt.path)
+			}
+			if got.Value != tt.want || got.Rest != tt.rest {
+				t.Fatalf("MatchPrefix(%q) = value %q rest %q, want value %q rest %q", tt.path, got.Value, got.Rest, tt.want, tt.rest)
+			}
+			if got.Params.Len() != 0 {
+				t.Fatalf("params length = %d, want 0", got.Params.Len())
+			}
+		})
+	}
+}
+
+func TestMatchPrefixDoesNotMatchPartialSegment(t *testing.T) {
+	var router Router[string]
+	router.Insert("/api", "api")
+
+	if got, ok := router.MatchPrefix("/apix/users"); ok {
+		t.Fatalf("MatchPrefix matched value %q rest %q, want miss", got.Value, got.Rest)
+	}
+}
+
+func TestMatchPrefixChoosesLongestPrefix(t *testing.T) {
+	for _, routes := range [][]string{
+		{"/api", "/api/v1"},
+		{"/api/v1", "/api"},
+	} {
+		var router Router[string]
+		for _, route := range routes {
+			router.Insert(route, route)
+		}
+
+		got, ok := router.MatchPrefix("/api/v1/users/42")
+		if !ok {
+			t.Fatal("MatchPrefix did not match")
+		}
+		if got.Value != "/api/v1" || got.Rest != "/users/42" {
+			t.Fatalf("MatchPrefix = value %q rest %q, want /api/v1 /users/42", got.Value, got.Rest)
+		}
+	}
+}
+
+func TestMatchPrefixMergesParamsAndRest(t *testing.T) {
+	var router Router[string]
+	router.Insert("/api/{version}", "api")
+
+	got, ok := router.MatchPrefix("/api/v1/users/42")
+	if !ok {
+		t.Fatal("MatchPrefix did not match")
+	}
+	if got.Value != "api" || got.Rest != "/users/42" {
+		t.Fatalf("MatchPrefix = value %q rest %q, want api /users/42", got.Value, got.Rest)
+	}
+	if !paramsEqual(got.Params, ParamsOf(Param{"version", "v1"})) {
+		t.Fatalf("params = %#v, want version=v1", got.Params.All())
+	}
+}
+
+func TestMatchPrefixChoosesMoreSpecificParamPrefix(t *testing.T) {
+	for _, routes := range [][]string{
+		{"/{id}/view", "/user-{id}/view"},
+		{"/user-{id}/view", "/{id}/view"},
+	} {
+		var router Router[string]
+		for _, route := range routes {
+			router.Insert(route, route)
+		}
+
+		got, ok := router.MatchPrefix("/user-42/view/details")
+		if !ok {
+			t.Fatal("MatchPrefix did not match")
+		}
+		if got.Value != "/user-{id}/view" || got.Rest != "/details" {
+			t.Fatalf("MatchPrefix = value %q rest %q, want /user-{id}/view /details", got.Value, got.Rest)
+		}
+		if !paramsEqual(got.Params, ParamsOf(Param{"id", "42"})) {
+			t.Fatalf("params = %#v, want id=42", got.Params.All())
+		}
+	}
+}
+
+func TestMatchPrefixBacktracksAcrossParamBranches(t *testing.T) {
+	var router Router[string]
+	router.Insert("/{id}/foo", "foo")
+	router.Insert("/{name}/bar", "bar")
+
+	got, ok := router.MatchPrefix("/abc/bar/users")
+	if !ok {
+		t.Fatal("MatchPrefix did not match")
+	}
+	if got.Value != "bar" || got.Rest != "/users" {
+		t.Fatalf("MatchPrefix = value %q rest %q, want bar /users", got.Value, got.Rest)
+	}
+	if got.Params.Get("id") != "" {
+		t.Fatalf("id param = %q, want empty", got.Params.Get("id"))
+	}
+	if got.Params.Get("name") != "abc" {
+		t.Fatalf("name param = %q, want abc", got.Params.Get("name"))
+	}
+}
+
+func TestMatchPrefixCatchAllConsumesRemainder(t *testing.T) {
+	var router Router[string]
+	router.Insert("/files", "files")
+	router.Insert("/files/{*path}", "catch-all")
+
+	got, ok := router.MatchPrefix("/files/css/app.css")
+	if !ok {
+		t.Fatal("MatchPrefix did not match")
+	}
+	if got.Value != "catch-all" || got.Rest != "/" {
+		t.Fatalf("MatchPrefix = value %q rest %q, want catch-all /", got.Value, got.Rest)
+	}
+	if !paramsEqual(got.Params, ParamsOf(Param{"path", "css/app.css"})) {
+		t.Fatalf("params = %#v, want path=css/app.css", got.Params.All())
+	}
+
+	got, ok = router.MatchPrefix("/files")
+	if !ok {
+		t.Fatal("MatchPrefix /files did not match")
+	}
+	if got.Value != "files" || got.Rest != "/" {
+		t.Fatalf("MatchPrefix /files = value %q rest %q, want files /", got.Value, got.Rest)
+	}
+}
+
+func TestMatchPrefixIntoReusesParams(t *testing.T) {
+	var router Router[string]
+	router.Insert("/{a}/{b}/{c}/{d}/{e}", "many")
+
+	buf := NewParams(5)
+	allocs := testing.AllocsPerRun(100, func() {
+		got, ok := router.MatchPrefixInto("/a/b/c/d/e/rest", buf)
+		if !ok {
+			t.Fatal("MatchPrefixInto did not match")
+		}
+		if got.Value != "many" || got.Rest != "/rest" {
+			t.Fatalf("MatchPrefixInto = value %q rest %q, want many /rest", got.Value, got.Rest)
+		}
+		if got.Params.Len() != 5 {
+			t.Fatalf("params length = %d, want 5", got.Params.Len())
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("allocs per MatchPrefixInto = %v, want 0", allocs)
+	}
+}
+
+func TestMatchPrefixIntoMissPreservesHeapParams(t *testing.T) {
+	var router Router[string]
+	router.Insert("/{a}/{b}/{c}/{d}/{e}", "many")
+
+	buf := NewParams(5)
+	got, ok := router.MatchPrefixInto("/miss", buf)
+	if ok {
+		t.Fatalf("MatchPrefixInto matched value %q, want miss", got.Value)
+	}
+	if got.Params.Len() != 0 {
+		t.Fatalf("miss params length = %d, want 0", got.Params.Len())
+	}
+	if got.Params.heap == nil || cap(got.Params.heap) < 5 {
+		t.Fatalf("miss params heap capacity = %d, want at least 5", cap(got.Params.heap))
+	}
+}
+
+func TestMatchPrefixIntoHeapParamsSurviveBacktracking(t *testing.T) {
+	t.Run("failed later branch", func(t *testing.T) {
+		var router Router[string]
+		router.Insert("/{id}", "id")
+		router.Insert("/{name}/bar", "bar")
+
+		got, ok := router.MatchPrefixInto("/abc/baz", NewParams(5))
+		if !ok {
+			t.Fatal("MatchPrefixInto did not match")
+		}
+		if got.Value != "id" || got.Rest != "/baz" {
+			t.Fatalf("MatchPrefixInto = value %q rest %q, want id /baz", got.Value, got.Rest)
+		}
+		if !paramsEqual(got.Params, ParamsOf(Param{"id", "abc"})) {
+			t.Fatalf("params = %#v, want id=abc", got.Params.All())
+		}
+	})
+
+	t.Run("less specific later branch", func(t *testing.T) {
+		var router Router[string]
+		router.Insert("/user-{id}/view", "specific")
+		router.Insert("/{id}/view", "generic")
+
+		got, ok := router.MatchPrefixInto("/user-42/view/details", NewParams(5))
+		if !ok {
+			t.Fatal("MatchPrefixInto did not match")
+		}
+		if got.Value != "specific" || got.Rest != "/details" {
+			t.Fatalf("MatchPrefixInto = value %q rest %q, want specific /details", got.Value, got.Rest)
+		}
+		if !paramsEqual(got.Params, ParamsOf(Param{"id", "42"})) {
+			t.Fatalf("params = %#v, want id=42", got.Params.All())
+		}
+	})
+}
+
 func TestParamsAccessors(t *testing.T) {
 	params := ParamsOf(Param{"empty", ""}, Param{"team", "core"}, Param{"team", "infra"})
 

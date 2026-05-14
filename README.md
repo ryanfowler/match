@@ -88,6 +88,21 @@ value, params, ok := router.MatchInto("/users/42", buf)
 _, _, _ = value, params, ok
 ```
 
+Use `MatchPrefix` when a route should match the front of a path and return the
+remaining path for nested dispatch or mounting:
+
+```go
+router.Insert("/api/{version}", "api")
+
+got, ok := router.MatchPrefix("/api/v1/users/42")
+// got.Value == "api"
+// got.Params.Get("version") == "v1"
+// got.Rest == "/users/42"
+// ok == true
+```
+
+Use `MatchPrefixInto` to reuse parameter storage for prefix matches.
+
 After routes are registered, a router may be used by multiple goroutines for
 matching. If routes are inserted while other goroutines are using the router,
 synchronize access around the router.
@@ -146,6 +161,19 @@ router.Insert("/posts/{year}/index", "index")
 
 value, _, _ := router.Match("/posts/2026/index")
 // value == "index"
+```
+
+Prefix matching uses the same route grammar but chooses the route that consumes
+the most path. A route registered as `/` matches the root prefix of any absolute
+path, and `Rest` is `/` when the match consumes the full path:
+
+```go
+router.Insert("/api", "api")
+router.Insert("/api/v1", "v1")
+
+got, _ := router.MatchPrefix("/api/v1/users")
+// got.Value == "v1"
+// got.Rest == "/users"
 ```
 
 Parameters are returned in the order they appear in the matched route:

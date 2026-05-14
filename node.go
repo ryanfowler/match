@@ -103,11 +103,9 @@ func (n *node[T]) insert(route string, value T) error {
 		normalized: normalized,
 		tokens:     tokens,
 		segments:   segments,
+		patterns:   makeSegmentPatterns(segments),
 		dynamic:    dynamic,
 		value:      value,
-	}
-	if dynamic {
-		entry.patterns = makeSegmentPatterns(segments)
 	}
 
 	if n.normalized == nil {
@@ -136,23 +134,69 @@ func (n *node[T]) insert(route string, value T) error {
 
 func (n *node[T]) match(route string) (T, Params, bool) {
 	root, index := n.matchRoot(route)
-	entry, params, ok := root.matchPath(route, index, Params{})
+	entry, ok := root.matchPath(route, index)
 	if !ok {
 		var val T
 		return val, Params{}, false
 	}
-	return entry.value, params, true
+	return entry.value, collectParams(entry, route, Params{}), true
 }
 
 func (n *node[T]) matchInto(route string, params Params) (T, Params, bool) {
 	root, index := n.matchRoot(route)
 	params = params.reset()
-	entry, gotParams, ok := root.matchPath(route, index, params)
+	entry, ok := root.matchPath(route, index)
 	if !ok {
 		var val T
 		return val, params, false
 	}
-	return entry.value, gotParams, true
+	return entry.value, collectParams(entry, route, params), true
+}
+
+func (n *node[T]) matchPrefix(path string) (PrefixMatch[T], bool) {
+	match, ok := n.matchPrefixRoute(path)
+	if !ok {
+		return PrefixMatch[T]{}, false
+	}
+	return match.prefix(path, collectParams(match.entry, path, Params{})), true
+}
+
+func (n *node[T]) matchPrefixInto(path string, params Params) (PrefixMatch[T], bool) {
+	params = params.reset()
+	match, ok := n.matchPrefixRoute(path)
+	if !ok {
+		return PrefixMatch[T]{Params: params}, false
+	}
+	return match.prefix(path, collectParams(match.entry, path, params)), true
+}
+
+func (n *node[T]) matchPrefixRoute(path string) (prefixMatch[T], bool) {
+	root, index := n.matchRoot(path)
+	best, ok := root.matchPrefixPath(path, index)
+	if rootMatch, rootOK := n.rootPrefixMatch(path); rootOK {
+		best = betterPrefixMatch(best, rootMatch)
+		ok = true
+	}
+	return best, ok
+}
+
+func (n *node[T]) rootPrefixMatch(path string) (prefixMatch[T], bool) {
+	if path == "" || path[0] != '/' {
+		return prefixMatch[T]{}, false
+	}
+	root := n.root.staticChild("")
+	if root == nil {
+		return prefixMatch[T]{}, false
+	}
+	slash := root.staticChild("")
+	if slash == nil || slash.value == nil {
+		return prefixMatch[T]{}, false
+	}
+	return prefixMatch[T]{
+		entry:     slash.value,
+		restIndex: 1,
+		consumed:  1,
+	}, true
 }
 
 func (n *node[T]) matchRoot(route string) (*segmentNode[T], int) {
@@ -168,12 +212,7 @@ func (n *node[T]) matchRoot(route string) (*segmentNode[T], int) {
 func (n *node[T]) insertTree(entry *routeEntry[T]) {
 	current := &n.root
 	for i, segment := range entry.segments {
-		var pattern segmentPattern
-		if entry.dynamic {
-			pattern = entry.patterns[i]
-		} else {
-			pattern = makeSegment(segment)
-		}
+		pattern := entry.patterns[i]
 
 		if pattern.catchAll {
 			current.catchAll = append(current.catchAll, catchAllEdge[T]{
@@ -219,51 +258,166 @@ func (n *node[T]) insertTree(entry *routeEntry[T]) {
 	}
 }
 
-func (n *segmentNode[T]) matchPath(path string, index int, params Params) (*routeEntry[T], Params, bool) {
+func (n *segmentNode[T]) matchPath(path string, index int) (*routeEntry[T], bool) {
 	if index < 0 {
 		if n.value != nil {
-			return n.value, params, true
+			return n.value, true
 		}
-		return nil, Params{}, false
+		return nil, false
 	}
 
 	segment, next := nextPathSegment(path, index)
 	if child := n.staticChild(segment); child != nil {
-		if entry, gotParams, ok := child.matchPath(path, next, params); ok {
-			return entry, gotParams, true
+		if entry, ok := child.matchPath(path, next); ok {
+			return entry, true
 		}
 	}
 
 	for i := range n.params {
-		nextParams, ok := matchParamEdge(n.params[i], segment, params)
-		if !ok {
+		if _, ok := matchParamPattern(n.params[i].pattern, segment); !ok {
 			continue
 		}
-		if entry, gotParams, ok := n.params[i].child.matchPath(path, next, nextParams); ok {
+		if entry, ok := n.params[i].child.matchPath(path, next); ok {
 			bestEntry := entry
-			bestParams := gotParams
 			for j := i + 1; j < len(n.params); j++ {
-				nextParams, ok := matchParamEdge(n.params[j], segment, params)
-				if !ok {
+				if _, ok := matchParamPattern(n.params[j].pattern, segment); !ok {
 					continue
 				}
-				entry, gotParams, ok := n.params[j].child.matchPath(path, next, nextParams)
+				entry, ok := n.params[j].child.matchPath(path, next)
 				if ok && moreSpecificRoute(entry, bestEntry) {
 					bestEntry = entry
-					bestParams = gotParams
 				}
 			}
-			return bestEntry, bestParams, true
+			return bestEntry, true
 		}
 	}
 
 	for i := range n.catchAll {
-		if nextParams, ok := matchCatchAll(n.catchAll[i], path[index:], params); ok {
-			return n.catchAll[i].route, nextParams, true
+		if _, ok := matchCatchAllPattern(n.catchAll[i].pattern, path[index:]); ok {
+			return n.catchAll[i].route, true
 		}
 	}
 
-	return nil, Params{}, false
+	return nil, false
+}
+
+type prefixMatch[T any] struct {
+	entry     *routeEntry[T]
+	restIndex int
+	consumed  int
+}
+
+func (m prefixMatch[T]) prefix(path string, params Params) PrefixMatch[T] {
+	return PrefixMatch[T]{
+		Value:  m.entry.value,
+		Params: params,
+		Rest:   remainingPrefixPath(path, m.restIndex),
+	}
+}
+
+func (n *segmentNode[T]) matchPrefixPath(path string, index int) (prefixMatch[T], bool) {
+	var best prefixMatch[T]
+	if n.value != nil {
+		best = prefixMatch[T]{
+			entry:     n.value,
+			restIndex: index,
+			consumed:  consumedPrefixPath(path, index),
+		}
+	}
+
+	if index >= 0 {
+		segment, next := nextPathSegment(path, index)
+		if child := n.staticChild(segment); child != nil {
+			if candidate, ok := child.matchPrefixPath(path, next); ok {
+				best = betterPrefixMatch(best, candidate)
+			}
+		}
+
+		for i := range n.params {
+			if _, ok := matchParamPattern(n.params[i].pattern, segment); !ok {
+				continue
+			}
+			if candidate, ok := n.params[i].child.matchPrefixPath(path, next); ok {
+				best = betterPrefixMatch(best, candidate)
+			}
+		}
+
+		for i := range n.catchAll {
+			if _, ok := matchCatchAllPattern(n.catchAll[i].pattern, path[index:]); ok {
+				candidate := prefixMatch[T]{
+					entry:     n.catchAll[i].route,
+					restIndex: -1,
+					consumed:  len(path) + 1,
+				}
+				best = betterPrefixMatch(best, candidate)
+			}
+		}
+	}
+
+	return best, best.entry != nil
+}
+
+func collectParams[T any](entry *routeEntry[T], path string, params Params) Params {
+	if !entry.dynamic {
+		return params
+	}
+
+	index := 0
+	for i, segment := range entry.segments {
+		pattern := entry.patterns[i]
+		if pattern.catchAll {
+			if value, ok := matchCatchAllPattern(pattern, path[index:]); ok {
+				params = params.append(catchAllToken(segment).text, value)
+			}
+			return params
+		}
+
+		pathSegment, next := nextPathSegment(path, index)
+		if pattern.param {
+			if value, ok := matchParamPattern(pattern, pathSegment); ok {
+				params = params.append(paramToken(segment).text, value)
+			}
+		}
+		index = next
+		if index < 0 {
+			return params
+		}
+	}
+
+	return params
+}
+
+func betterPrefixMatch[T any](best, candidate prefixMatch[T]) prefixMatch[T] {
+	if best.entry == nil || candidate.consumed > best.consumed {
+		return candidate
+	}
+	if candidate.consumed == best.consumed && moreSpecificRoute(candidate.entry, best.entry) {
+		return candidate
+	}
+	return best
+}
+
+func consumedPrefixPath(path string, index int) int {
+	if index < 0 {
+		return len(path) + 1
+	}
+	return index
+}
+
+func remainingPrefixPath(path string, index int) string {
+	if index < 0 || index > len(path) || index == len(path) {
+		return "/"
+	}
+	if path[index] == '/' {
+		if index == 1 && len(path) > 1 && path[0] == '/' {
+			return "/" + path[index+1:]
+		}
+		return path[index:]
+	}
+	if index == 0 {
+		return path
+	}
+	return path[index-1:]
 }
 
 func moreSpecificRoute[T any](a, b *routeEntry[T]) bool {
@@ -456,30 +610,29 @@ func paramEdgeLess[T any](a, b paramEdge[T]) bool {
 	return len(a.pattern.prefix) > len(b.pattern.prefix)
 }
 
-func matchParamEdge[T any](edge paramEdge[T], segment string, params Params) (Params, bool) {
-	pattern := edge.pattern
+func matchParamPattern(pattern segmentPattern, segment string) (string, bool) {
 	if !strings.HasPrefix(segment, pattern.prefix) || !strings.HasSuffix(segment, pattern.suffix) {
-		return Params{}, false
+		return "", false
 	}
 
 	valueStart := len(pattern.prefix)
 	valueEnd := len(segment) - len(pattern.suffix)
 	if valueEnd <= valueStart {
-		return Params{}, false
+		return "", false
 	}
-	return params.append(edge.param.text, segment[valueStart:valueEnd]), true
+	return segment[valueStart:valueEnd], true
 }
 
-func matchCatchAll[T any](edge catchAllEdge[T], rest string, params Params) (Params, bool) {
-	if !strings.HasPrefix(rest, edge.pattern.prefix) {
-		return Params{}, false
+func matchCatchAllPattern(pattern segmentPattern, rest string) (string, bool) {
+	if !strings.HasPrefix(rest, pattern.prefix) {
+		return "", false
 	}
 
-	value := rest[len(edge.pattern.prefix):]
+	value := rest[len(pattern.prefix):]
 	if value == "" {
-		return Params{}, false
+		return "", false
 	}
-	return params.append(edge.token.text, value), true
+	return value, true
 }
 
 func parseRoute(route string) ([]token, string, error) {

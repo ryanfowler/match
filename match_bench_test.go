@@ -8,6 +8,7 @@ import (
 var (
 	benchString string
 	benchParams Params
+	benchPrefix PrefixMatch[string]
 	benchOK     bool
 )
 
@@ -120,6 +121,74 @@ func BenchmarkMatchInto(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				benchString, benchParams, benchOK = router.MatchInto(bm.path, params)
+			}
+		})
+	}
+}
+
+func BenchmarkMatchPrefix(b *testing.B) {
+	benchmarks := []struct {
+		name   string
+		routes []string
+		path   string
+	}{
+		{
+			name:   "Static",
+			routes: []string{"/", "/api", "/api/v1", "/assets"},
+			path:   "/api/v1/users/42",
+		},
+		{
+			name:   "Param",
+			routes: []string{"/", "/api/{version}", "/assets/{*path}"},
+			path:   "/api/v1/users/42",
+		},
+		{
+			name:   "CatchAll",
+			routes: []string{"/", "/api", "/assets/{*path}"},
+			path:   "/assets/css/app.css",
+		},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			router := benchmarkRouter(b, bm.routes)
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				benchPrefix, benchOK = router.MatchPrefix(bm.path)
+			}
+		})
+	}
+}
+
+func BenchmarkMatchPrefixInto(b *testing.B) {
+	benchmarks := []struct {
+		name   string
+		routes []string
+		path   string
+	}{
+		{
+			name:   "Param",
+			routes: []string{"/", "/api/{version}", "/assets/{*path}"},
+			path:   "/api/v1/users/42",
+		},
+		{
+			name:   "ManyParams",
+			routes: []string{"/{a}/{b}/{c}/{d}/{e}"},
+			path:   "/a/b/c/d/e/rest",
+		},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			router := benchmarkRouter(b, bm.routes)
+			params := NewParams(5)
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				benchPrefix, benchOK = router.MatchPrefixInto(bm.path, params)
 			}
 		})
 	}
