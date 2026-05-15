@@ -1,7 +1,10 @@
 # match
 
-`match` is a small generic path router for Go. It maps path patterns to values
-you provide, then returns the matched value and any captured parameters.
+[![Go Reference](https://pkg.go.dev/badge/github.com/ryanfowler/match.svg)](https://pkg.go.dev/github.com/ryanfowler/match)
+
+`match` is a small, highly performant generic path router for Go. It maps path
+patterns to values you provide, then returns the matched value and any captured
+parameters.
 
 It is useful when you want routing behavior without pulling in a full HTTP
 framework: command dispatch, API route lookup, asset path handling, or any other
