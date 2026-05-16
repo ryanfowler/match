@@ -572,6 +572,33 @@ func TestMatchitManyParameters(t *testing.T) {
 	}
 }
 
+func TestMatchPreallocatesHeapParams(t *testing.T) {
+	const paramCount = 9
+	route := makeParamRoute("p", paramCount)
+	path := makePath("v", paramCount)
+
+	var router Router[string]
+	if err := router.TryInsert(route, "many"); err != nil {
+		t.Fatalf("insert many-param route: %v", err)
+	}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		_, params, ok := router.Match(path)
+		if !ok {
+			t.Fatal("Match did not match")
+		}
+		if params.Len() != paramCount {
+			t.Fatalf("params length = %d, want %d", params.Len(), paramCount)
+		}
+		if params.heap == nil || cap(params.heap) < paramCount {
+			t.Fatalf("params heap capacity = %d, want at least %d", cap(params.heap), paramCount)
+		}
+	})
+	if allocs != 1 {
+		t.Fatalf("allocs per Match = %v, want 1", allocs)
+	}
+}
+
 func TestMatchitHighParameterOrdinalDoesNotCollideWithLiteral(t *testing.T) {
 	dynamic := makeParamRoute("p", 257)
 	static := makeParamRoute("q", 256) + "/{{a}}"

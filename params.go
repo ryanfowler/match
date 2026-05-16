@@ -165,6 +165,21 @@ func (p Params) reset() Params {
 	return p
 }
 
+func (p Params) ensureCapacity(capacity int) Params {
+	if capacity <= len(p.inline) || cap(p.heap) >= capacity {
+		return p
+	}
+
+	heap := make([]Param, p.len, capacity)
+	if p.heap != nil {
+		copy(heap, p.heap[:p.len])
+	} else {
+		copy(heap, p.inline[:p.len])
+	}
+	p.heap = heap
+	return p
+}
+
 func (p Params) append(key, val string) Params {
 	if p.heap != nil {
 		p.heap = append(p.heap, Param{Key: key, Val: val})
