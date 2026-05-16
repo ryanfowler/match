@@ -50,17 +50,34 @@ type token struct {
 }
 
 type routeEntry[T any] struct {
-	route        string
-	patterns     []segmentPattern
-	captureNames []string
-	captureCount int
-	value        T
+	route                 string
+	patterns              []segmentPattern
+	captureNames          []string
+	captureCount          int
+	segmentCount          int
+	order                 int
+	firstStaticSegment    string
+	hasFirstStaticSegment bool
+	hasCatchAll           bool
+	value                 T
 }
 
 type node[T any] struct {
-	routes     []*routeEntry[T]
-	normalized map[string]string
-	root       segmentNode[T]
+	routes        []*routeEntry[T]
+	normalized    map[string]string
+	conflictIndex routeConflictIndex[T]
+	root          segmentNode[T]
+}
+
+type routeConflictIndex[T any] struct {
+	bySegmentCount map[int]*routeConflictBucket[T]
+	catchAll       routeConflictBucket[T]
+}
+
+type routeConflictBucket[T any] struct {
+	all      []*routeEntry[T]
+	static   map[string][]*routeEntry[T]
+	wildcard []*routeEntry[T]
 }
 
 type segmentNode[T any] struct {
@@ -94,12 +111,18 @@ func (n *node[T]) insert(route string, value T) error {
 
 	segments := splitTokenSegments(tokens)
 	patterns, captureNames, captureCount := makeSegmentPatterns(segments)
+	firstStaticSegment, hasFirstStaticSegment := firstDefinitelyStaticSegment(patterns)
 	entry := &routeEntry[T]{
-		route:        unescapeBraces(route),
-		patterns:     patterns,
-		captureNames: captureNames,
-		captureCount: captureCount,
-		value:        value,
+		route:                 unescapeBraces(route),
+		patterns:              patterns,
+		captureNames:          captureNames,
+		captureCount:          captureCount,
+		segmentCount:          len(patterns),
+		order:                 len(n.routes),
+		firstStaticSegment:    firstStaticSegment,
+		hasFirstStaticSegment: hasFirstStaticSegment,
+		hasCatchAll:           hasCatchAll(patterns),
+		value:                 value,
 	}
 
 	if n.normalized == nil {
@@ -110,20 +133,99 @@ func (n *node[T]) insert(route string, value T) error {
 	}
 
 	if entry.captureCount != 0 || n.root.conflictsWithCatchAllStatic(segments, 0) {
-		for _, existing := range n.routes {
-			if entry.captureCount == 0 && existing.captureCount == 0 {
-				continue
-			}
-			if conflictsEntries(existing, entry) {
-				return &ConflictError{Route: entry.route, With: existing.route}
-			}
+		if existing := n.conflictIndex.findConflict(entry); existing != nil {
+			return &ConflictError{Route: entry.route, With: existing.route}
 		}
 	}
 
 	n.normalized[normalized] = entry.route
 	n.routes = append(n.routes, entry)
+	n.conflictIndex.add(entry)
 	n.insertTree(entry)
 	return nil
+}
+
+func (i *routeConflictIndex[T]) add(entry *routeEntry[T]) {
+	if entry.captureCount == 0 {
+		return
+	}
+	if i.bySegmentCount == nil {
+		i.bySegmentCount = make(map[int]*routeConflictBucket[T])
+	}
+	bucket := i.bySegmentCount[entry.segmentCount]
+	if bucket == nil {
+		bucket = &routeConflictBucket[T]{}
+		i.bySegmentCount[entry.segmentCount] = bucket
+	}
+	bucket.add(entry)
+	if entry.hasCatchAll {
+		i.catchAll.add(entry)
+	}
+}
+
+func (b *routeConflictBucket[T]) add(entry *routeEntry[T]) {
+	b.all = append(b.all, entry)
+	if !entry.hasFirstStaticSegment {
+		b.wildcard = append(b.wildcard, entry)
+		return
+	}
+	if b.static == nil {
+		b.static = make(map[string][]*routeEntry[T])
+	}
+	b.static[entry.firstStaticSegment] = append(b.static[entry.firstStaticSegment], entry)
+}
+
+func (i *routeConflictIndex[T]) findConflict(entry *routeEntry[T]) *routeEntry[T] {
+	var best *routeEntry[T]
+	if bucket := i.bySegmentCount[entry.segmentCount]; bucket != nil {
+		best = earlierConflict(best, bucket.findConflict(entry, 0))
+	}
+
+	if entry.hasCatchAll {
+		for segmentCount, bucket := range i.bySegmentCount {
+			if segmentCount == entry.segmentCount {
+				continue
+			}
+			best = earlierConflict(best, bucket.findConflict(entry, 0))
+		}
+		return best
+	}
+
+	return earlierConflict(best, i.catchAll.findConflict(entry, entry.segmentCount))
+}
+
+func (b *routeConflictBucket[T]) findConflict(entry *routeEntry[T], skipSegmentCount int) *routeEntry[T] {
+	if b == nil {
+		return nil
+	}
+	if entry.hasFirstStaticSegment {
+		static := findConflictInRoutes(b.static[entry.firstStaticSegment], entry, skipSegmentCount)
+		wildcard := findConflictInRoutes(b.wildcard, entry, skipSegmentCount)
+		return earlierConflict(static, wildcard)
+	}
+	return findConflictInRoutes(b.all, entry, skipSegmentCount)
+}
+
+func findConflictInRoutes[T any](routes []*routeEntry[T], entry *routeEntry[T], skipSegmentCount int) *routeEntry[T] {
+	for _, existing := range routes {
+		if skipSegmentCount != 0 && existing.segmentCount == skipSegmentCount {
+			continue
+		}
+		if entry.captureCount == 0 && existing.captureCount == 0 {
+			continue
+		}
+		if conflictsEntries(existing, entry) {
+			return existing
+		}
+	}
+	return nil
+}
+
+func earlierConflict[T any](a, b *routeEntry[T]) *routeEntry[T] {
+	if a == nil || (b != nil && b.order < a.order) {
+		return b
+	}
+	return a
 }
 
 func (n *node[T]) match(route string) (T, Params, bool) {
@@ -567,6 +669,34 @@ func makeSegmentPatterns(segments [][]token) ([]segmentPattern, []string, int) {
 		}
 	}
 	return patterns, captureNames, captureCount
+}
+
+func firstDefinitelyStaticSegment(patterns []segmentPattern) (string, bool) {
+	if len(patterns) == 0 {
+		return "", false
+	}
+
+	// Absolute routes all start with the same empty segment, so the next segment
+	// is the first useful discriminator.
+	index := 0
+	if len(patterns) > 1 && patterns[0].literal && patterns[0].raw == "" {
+		index = 1
+	}
+
+	pattern := patterns[index]
+	if !pattern.literal || pattern.raw == "" {
+		return "", false
+	}
+	return pattern.raw, true
+}
+
+func hasCatchAll(patterns []segmentPattern) bool {
+	for i := range patterns {
+		if patterns[i].catchAll {
+			return true
+		}
+	}
+	return false
 }
 
 func sameSegmentPattern(a, b segmentPattern) bool {
