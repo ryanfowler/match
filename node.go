@@ -772,6 +772,10 @@ func matchCatchAllPattern(pattern segmentPattern, rest string) (string, bool) {
 }
 
 func parseRoute(route string) ([]token, string, error) {
+	if !strings.ContainsAny(route, "{}") {
+		return []token{{kind: tokenLiteral, text: route}}, normalizedLiteral(route), nil
+	}
+
 	var tokens []token
 	var normalized strings.Builder
 	var literal strings.Builder
@@ -851,6 +855,16 @@ func parseRoute(route string) ([]token, string, error) {
 	flushLiteral()
 
 	return tokens, normalized.String(), nil
+}
+
+func normalizedLiteral(literal string) string {
+	var normalized strings.Builder
+	normalized.Grow(len(literal) + 8)
+	normalized.WriteByte('L')
+	normalized.WriteString(strconv.Itoa(len(literal)))
+	normalized.WriteByte(':')
+	normalized.WriteString(literal)
+	return normalized.String()
 }
 
 func findParamEnd(route string, start int) (int, error) {
