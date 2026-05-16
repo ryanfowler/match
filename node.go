@@ -67,6 +67,7 @@ type node[T any] struct {
 	normalized    map[string]string
 	conflictIndex routeConflictIndex[T]
 	root          segmentNode[T]
+	rootPrefix    *routeEntry[T]
 }
 
 type routeConflictIndex[T any] struct {
@@ -142,7 +143,18 @@ func (n *node[T]) insert(route string, value T) error {
 	n.routes = append(n.routes, entry)
 	n.conflictIndex.add(entry)
 	n.insertTree(entry)
+	n.refreshRootPrefix(entry)
 	return nil
+}
+
+func (n *node[T]) refreshRootPrefix(entry *routeEntry[T]) {
+	if len(entry.patterns) == 2 &&
+		entry.patterns[0].literal &&
+		entry.patterns[0].raw == "" &&
+		entry.patterns[1].literal &&
+		entry.patterns[1].raw == "" {
+		n.rootPrefix = entry
+	}
 }
 
 func (i *routeConflictIndex[T]) add(entry *routeEntry[T]) {
@@ -277,19 +289,11 @@ func (n *node[T]) matchPrefixRoute(path string) (prefixMatch[T], bool) {
 }
 
 func (n *node[T]) rootPrefixMatch(path string) (prefixMatch[T], bool) {
-	if path == "" || path[0] != '/' {
-		return prefixMatch[T]{}, false
-	}
-	root := n.root.staticChild("")
-	if root == nil {
-		return prefixMatch[T]{}, false
-	}
-	slash := root.staticChild("")
-	if slash == nil || slash.value == nil {
+	if path == "" || path[0] != '/' || n.rootPrefix == nil {
 		return prefixMatch[T]{}, false
 	}
 	return prefixMatch[T]{
-		entry:     slash.value,
+		entry:     n.rootPrefix,
 		restIndex: 1,
 		consumed:  1,
 	}, true
@@ -726,6 +730,10 @@ func paramEdgeLess[T any](a, b paramEdge[T]) bool {
 }
 
 func matchParamPattern(pattern segmentPattern, segment string) (string, bool) {
+	if pattern.prefix == "" && pattern.suffix == "" {
+		return segment, segment != ""
+	}
+
 	if !strings.HasPrefix(segment, pattern.prefix) || !strings.HasSuffix(segment, pattern.suffix) {
 		return "", false
 	}
@@ -739,6 +747,10 @@ func matchParamPattern(pattern segmentPattern, segment string) (string, bool) {
 }
 
 func matchCatchAllPattern(pattern segmentPattern, rest string) (string, bool) {
+	if pattern.prefix == "" {
+		return rest, rest != ""
+	}
+
 	if !strings.HasPrefix(rest, pattern.prefix) {
 		return "", false
 	}
