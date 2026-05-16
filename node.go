@@ -67,6 +67,7 @@ type node[T any] struct {
 	normalized    map[string]string
 	conflictIndex routeConflictIndex[T]
 	root          segmentNode[T]
+	absoluteRoot  *segmentNode[T]
 	rootPrefix    *routeEntry[T]
 }
 
@@ -303,8 +304,8 @@ func (n *node[T]) matchRoot(route string) (*segmentNode[T], int, bool) {
 	if route == "" || route[0] != '/' || len(n.root.params) != 0 || len(n.root.catchAll) != 0 {
 		return &n.root, 0, false
 	}
-	if child := n.root.staticChild(""); child != nil {
-		return child, 1, true
+	if n.absoluteRoot != nil {
+		return n.absoluteRoot, 1, true
 	}
 	return &n.root, 0, false
 }
@@ -325,6 +326,9 @@ func (n *node[T]) insertTree(entry *routeEntry[T]) {
 			if child == nil {
 				child = &segmentNode[T]{}
 				current.addStaticChild(pattern.raw, child)
+			}
+			if current == &n.root && pattern.raw == "" {
+				n.absoluteRoot = child
 			}
 			current = child
 		} else {
@@ -465,7 +469,12 @@ func collectParams[T any](entry *routeEntry[T], path string, params Params) Para
 	for i := range entry.patterns {
 		pattern := entry.patterns[i]
 		if pattern.catchAll {
-			if value, ok := matchCatchAllPattern(pattern, path[index:]); ok {
+			rest := path[index:]
+			if pattern.prefix == "" {
+				if rest != "" {
+					params = params.append(entry.captureNames[i], rest)
+				}
+			} else if value, ok := matchCatchAllPattern(pattern, rest); ok {
 				params = params.append(entry.captureNames[i], value)
 			}
 			return params
@@ -473,7 +482,11 @@ func collectParams[T any](entry *routeEntry[T], path string, params Params) Para
 
 		pathSegment, next := nextPathSegment(path, index)
 		if pattern.param {
-			if value, ok := matchParamPattern(pattern, pathSegment); ok {
+			if pattern.prefix == "" && pattern.suffix == "" {
+				if pathSegment != "" {
+					params = params.append(entry.captureNames[i], pathSegment)
+				}
+			} else if value, ok := matchParamPattern(pattern, pathSegment); ok {
 				params = params.append(entry.captureNames[i], value)
 			}
 		}
@@ -621,13 +634,11 @@ func nextPathSegment(path string, index int) (string, int) {
 }
 
 func splitTokenSegments(tokens []token) [][]token {
-	var segments [][]token
+	segments := make([][]token, 0, countTokenSegments(tokens))
 	var current []token
 
 	flush := func() {
-		segment := make([]token, len(current))
-		copy(segment, current)
-		segments = append(segments, segment)
+		segments = append(segments, current)
 		current = nil
 	}
 
@@ -655,6 +666,17 @@ func splitTokenSegments(tokens []token) [][]token {
 
 	flush()
 	return segments
+}
+
+func countTokenSegments(tokens []token) int {
+	count := 1
+	for _, t := range tokens {
+		if t.kind != tokenLiteral {
+			continue
+		}
+		count += strings.Count(t.text, "/")
+	}
+	return count
 }
 
 func makeSegmentPatterns(segments [][]token) ([]segmentPattern, []string, int) {
@@ -763,9 +785,15 @@ func matchCatchAllPattern(pattern segmentPattern, rest string) (string, bool) {
 }
 
 func parseRoute(route string) ([]token, string, error) {
-	var tokens []token
+	if !strings.ContainsAny(route, "{}") {
+		return []token{{kind: tokenLiteral, text: route}}, normalizedLiteral(route), nil
+	}
+
+	tokens := make([]token, 0, countRouteTokens(route))
 	var normalized strings.Builder
 	var literal strings.Builder
+	normalized.Grow(len(route) + 8)
+	literal.Grow(len(route))
 	paramsInSegment := 0
 	paramOrdinal := 0
 
@@ -842,6 +870,35 @@ func parseRoute(route string) ([]token, string, error) {
 	flushLiteral()
 
 	return tokens, normalized.String(), nil
+}
+
+func normalizedLiteral(literal string) string {
+	var normalized strings.Builder
+	normalized.Grow(len(literal) + 8)
+	normalized.WriteByte('L')
+	normalized.WriteString(strconv.Itoa(len(literal)))
+	normalized.WriteByte(':')
+	normalized.WriteString(literal)
+	return normalized.String()
+}
+
+func countRouteTokens(route string) int {
+	count := 1
+	for i := 0; i < len(route); i++ {
+		switch route[i] {
+		case '{':
+			if i+1 < len(route) && route[i+1] == '{' {
+				i++
+				continue
+			}
+			count += 2
+		case '}':
+			if i+1 < len(route) && route[i+1] == '}' {
+				i++
+			}
+		}
+	}
+	return count
 }
 
 func findParamEnd(route string, start int) (int, error) {
