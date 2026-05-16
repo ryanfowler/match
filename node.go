@@ -621,7 +621,7 @@ func nextPathSegment(path string, index int) (string, int) {
 }
 
 func splitTokenSegments(tokens []token) [][]token {
-	var segments [][]token
+	segments := make([][]token, 0, countTokenSegments(tokens))
 	var current []token
 
 	flush := func() {
@@ -653,6 +653,17 @@ func splitTokenSegments(tokens []token) [][]token {
 
 	flush()
 	return segments
+}
+
+func countTokenSegments(tokens []token) int {
+	count := 1
+	for _, t := range tokens {
+		if t.kind != tokenLiteral {
+			continue
+		}
+		count += strings.Count(t.text, "/")
+	}
+	return count
 }
 
 func makeSegmentPatterns(segments [][]token) ([]segmentPattern, []string, int) {
