@@ -465,7 +465,12 @@ func collectParams[T any](entry *routeEntry[T], path string, params Params) Para
 	for i := range entry.patterns {
 		pattern := entry.patterns[i]
 		if pattern.catchAll {
-			if value, ok := matchCatchAllPattern(pattern, path[index:]); ok {
+			rest := path[index:]
+			if pattern.prefix == "" {
+				if rest != "" {
+					params = params.append(entry.captureNames[i], rest)
+				}
+			} else if value, ok := matchCatchAllPattern(pattern, rest); ok {
 				params = params.append(entry.captureNames[i], value)
 			}
 			return params
@@ -473,7 +478,11 @@ func collectParams[T any](entry *routeEntry[T], path string, params Params) Para
 
 		pathSegment, next := nextPathSegment(path, index)
 		if pattern.param {
-			if value, ok := matchParamPattern(pattern, pathSegment); ok {
+			if pattern.prefix == "" && pattern.suffix == "" {
+				if pathSegment != "" {
+					params = params.append(entry.captureNames[i], pathSegment)
+				}
+			} else if value, ok := matchParamPattern(pattern, pathSegment); ok {
 				params = params.append(entry.captureNames[i], value)
 			}
 		}
