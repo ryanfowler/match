@@ -60,7 +60,7 @@ type routeEntry[T any] struct {
 }
 
 type node[T any] struct {
-	routes     []routeEntry[T]
+	routes     []*routeEntry[T]
 	normalized map[string]string
 	root       segmentNode[T]
 }
@@ -98,7 +98,7 @@ func (n *node[T]) insert(route string, value T) error {
 
 	segments := splitTokenSegments(tokens)
 	dynamic := hasParamToken(tokens)
-	entry := routeEntry[T]{
+	entry := &routeEntry[T]{
 		route:      unescapeBraces(route),
 		normalized: normalized,
 		tokens:     tokens,
@@ -128,7 +128,7 @@ func (n *node[T]) insert(route string, value T) error {
 
 	n.normalized[entry.normalized] = entry.route
 	n.routes = append(n.routes, entry)
-	n.insertTree(&n.routes[len(n.routes)-1])
+	n.insertTree(entry)
 	return nil
 }
 
@@ -769,7 +769,7 @@ func unescapeBraces(s string) string {
 	return s
 }
 
-func conflictsEntries[T any](a, b routeEntry[T]) bool {
+func conflictsEntries[T any](a, b *routeEntry[T]) bool {
 	if hasCatchAllPrefixConflict(a.tokens, b.tokens) || hasCatchAllPrefixConflict(b.tokens, a.tokens) {
 		return true
 	}

@@ -122,6 +122,32 @@ func TestMatchitDivergentParamRoutesKeepParamNames(t *testing.T) {
 	}
 }
 
+func TestTrieReferencesCanonicalRouteEntriesAfterRouteGrowth(t *testing.T) {
+	var router Router[int]
+	router.Insert("/first", 1)
+	router.Insert("/files/{*path}", 2)
+
+	for i := 0; i < 128; i++ {
+		router.Insert(fmt.Sprintf("/route-%03d", i), i+3)
+	}
+
+	staticEntry, ok := router.root.root.matchPath("/first", 0)
+	if !ok {
+		t.Fatal("match static route: not found")
+	}
+	if staticEntry != router.root.routes[0] {
+		t.Fatal("static trie entry does not reference canonical route entry")
+	}
+
+	catchAllEntry, ok := router.root.root.matchPath("/files/app.css", 0)
+	if !ok {
+		t.Fatal("match catch-all route: not found")
+	}
+	if catchAllEntry != router.root.routes[1] {
+		t.Fatal("catch-all trie entry does not reference canonical route entry")
+	}
+}
+
 func TestMatchRootCatchAllFallbackWithAbsoluteRoutes(t *testing.T) {
 	var router Router[string]
 	router.Insert("{*path}", "catch-all")
