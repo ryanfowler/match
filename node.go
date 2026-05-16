@@ -625,9 +625,7 @@ func splitTokenSegments(tokens []token) [][]token {
 	var current []token
 
 	flush := func() {
-		segment := make([]token, len(current))
-		copy(segment, current)
-		segments = append(segments, segment)
+		segments = append(segments, current)
 		current = nil
 	}
 
