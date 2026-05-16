@@ -67,6 +67,7 @@ type node[T any] struct {
 	normalized    map[string]string
 	conflictIndex routeConflictIndex[T]
 	root          segmentNode[T]
+	absoluteRoot  *segmentNode[T]
 	rootPrefix    *routeEntry[T]
 }
 
@@ -303,8 +304,8 @@ func (n *node[T]) matchRoot(route string) (*segmentNode[T], int, bool) {
 	if route == "" || route[0] != '/' || len(n.root.params) != 0 || len(n.root.catchAll) != 0 {
 		return &n.root, 0, false
 	}
-	if child := n.root.staticChild(""); child != nil {
-		return child, 1, true
+	if n.absoluteRoot != nil {
+		return n.absoluteRoot, 1, true
 	}
 	return &n.root, 0, false
 }
@@ -325,6 +326,9 @@ func (n *node[T]) insertTree(entry *routeEntry[T]) {
 			if child == nil {
 				child = &segmentNode[T]{}
 				current.addStaticChild(pattern.raw, child)
+			}
+			if current == &n.root && pattern.raw == "" {
+				n.absoluteRoot = child
 			}
 			current = child
 		} else {
