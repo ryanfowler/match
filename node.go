@@ -725,6 +725,7 @@ func findParamEnd(route string, start int) (int, error) {
 				i++
 				continue
 			}
+			return 0, ErrInvalidParam
 		case '}':
 			if i+1 < len(route) && route[i+1] == '}' {
 				i++

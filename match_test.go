@@ -306,6 +306,7 @@ func TestMatchitInsertErrors(t *testing.T) {
 		{"unmatched close", "x}", ErrInvalidParam},
 		{"slash in param", "/{foo/bar}", ErrInvalidParam},
 		{"star in param name", "/{foo*bar}", ErrInvalidParam},
+		{"unescaped open brace in param", "/{a{b}", ErrInvalidParam},
 	}
 
 	for _, tt := range tests {
