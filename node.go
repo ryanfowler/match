@@ -770,7 +770,7 @@ func unescapeBraces(s string) string {
 }
 
 func conflictsEntries[T any](a, b *routeEntry[T]) bool {
-	if hasCatchAllPrefixConflict(a.tokens, b.tokens) || hasCatchAllPrefixConflict(b.tokens, a.tokens) {
+	if hasCatchAllPrefixConflict(a, b) || hasCatchAllPrefixConflict(b, a) {
 		return true
 	}
 	return conflictsPatterns(a.patterns, b.patterns)
@@ -797,16 +797,23 @@ func conflictsPatterns(as, bs []segmentPattern) bool {
 	return false
 }
 
-func hasCatchAllPrefixConflict(a, b []token) bool {
-	for i, t := range a {
-		if t.kind != tokenCatchAll {
+func hasCatchAllPrefixConflict[T any](a, b *routeEntry[T]) bool {
+	if !b.dynamic {
+		return false
+	}
+	for i, pattern := range a.patterns {
+		if !pattern.catchAll {
 			continue
 		}
-		if !hasParamToken(b) {
+		if len(b.patterns) <= i {
 			return false
 		}
-		prefix := literalPrefix(a[:i])
-		return strings.HasPrefix(literalPrefix(b), prefix)
+		for j := 0; j < i; j++ {
+			if !segmentMayOverlap(a.patterns[j], b.patterns[j]) {
+				return false
+			}
+		}
+		return catchAllOverlapsSuffix(pattern, b.patterns[i:])
 	}
 	return false
 }
@@ -818,17 +825,6 @@ func hasParamToken(tokens []token) bool {
 		}
 	}
 	return false
-}
-
-func literalPrefix(tokens []token) string {
-	var b strings.Builder
-	for _, t := range tokens {
-		if t.kind != tokenLiteral {
-			break
-		}
-		b.WriteString(t.text)
-	}
-	return b.String()
 }
 
 type segmentPattern struct {
@@ -911,4 +907,39 @@ func compatibleAffixes(a, b string) bool {
 
 func compatibleSuffixes(a, b string) bool {
 	return strings.HasSuffix(a, b) || strings.HasSuffix(b, a)
+}
+
+func catchAllOverlapsSuffix(catchAll segmentPattern, suffix []segmentPattern) bool {
+	if len(suffix) == 0 {
+		return false
+	}
+	first := suffix[0]
+	if segmentCanStartLongerThan(first, catchAll.prefix) {
+		return true
+	}
+	return len(suffix) > 1 && segmentCanEqual(first, catchAll.prefix)
+}
+
+func segmentCanStartLongerThan(pattern segmentPattern, prefix string) bool {
+	if pattern.literal {
+		return strings.HasPrefix(pattern.raw, prefix) && len(pattern.raw) > len(prefix)
+	}
+	return segmentCanStartWith(pattern, prefix)
+}
+
+func segmentCanStartWith(pattern segmentPattern, prefix string) bool {
+	if pattern.literal {
+		return strings.HasPrefix(pattern.raw, prefix)
+	}
+	return compatibleAffixes(pattern.prefix, prefix)
+}
+
+func segmentCanEqual(pattern segmentPattern, value string) bool {
+	if pattern.literal {
+		return pattern.raw == value
+	}
+	if pattern.catchAll {
+		return strings.HasPrefix(value, pattern.prefix) && len(value) > len(pattern.prefix)
+	}
+	return literalMatchesSegment(value, pattern)
 }
