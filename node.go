@@ -50,12 +50,13 @@ type token struct {
 }
 
 type routeEntry[T any] struct {
-	route      string
-	normalized string
-	segments   [][]token
-	patterns   []segmentPattern
-	captures   int
-	value      T
+	route        string
+	normalized   string
+	segments     [][]token
+	patterns     []segmentPattern
+	captureNames []string
+	captureCount int
+	value        T
 }
 
 type node[T any] struct {
@@ -79,7 +80,6 @@ type staticEdge[T any] struct {
 
 type paramEdge[T any] struct {
 	pattern segmentPattern
-	capture string
 	child   *segmentNode[T]
 }
 
@@ -95,14 +95,15 @@ func (n *node[T]) insert(route string, value T) error {
 	}
 
 	segments := splitTokenSegments(tokens)
-	patterns, captures := makeSegmentPatterns(segments)
+	patterns, captureNames, captureCount := makeSegmentPatterns(segments)
 	entry := &routeEntry[T]{
-		route:      unescapeBraces(route),
-		normalized: normalized,
-		segments:   segments,
-		patterns:   patterns,
-		captures:   captures,
-		value:      value,
+		route:        unescapeBraces(route),
+		normalized:   normalized,
+		segments:     segments,
+		patterns:     patterns,
+		captureNames: captureNames,
+		captureCount: captureCount,
+		value:        value,
 	}
 
 	if n.normalized == nil {
@@ -112,9 +113,9 @@ func (n *node[T]) insert(route string, value T) error {
 		return &ConflictError{Route: entry.route, With: existing}
 	}
 
-	if entry.captures != 0 || n.root.conflictsWithCatchAllStatic(entry.segments, 0) {
+	if entry.captureCount != 0 || n.root.conflictsWithCatchAllStatic(entry.segments, 0) {
 		for _, existing := range n.routes {
-			if entry.captures == 0 && existing.captures == 0 {
+			if entry.captureCount == 0 && existing.captureCount == 0 {
 				continue
 			}
 			if conflictsEntries(existing, entry) {
@@ -229,8 +230,7 @@ func (n *node[T]) insertTree(entry *routeEntry[T]) {
 		} else {
 			var child *segmentNode[T]
 			for j := range current.params {
-				if sameSegmentPattern(current.params[j].pattern, pattern) &&
-					current.params[j].capture == pattern.capture {
+				if sameSegmentPattern(current.params[j].pattern, pattern) {
 					child = current.params[j].child
 					break
 				}
@@ -239,7 +239,6 @@ func (n *node[T]) insertTree(entry *routeEntry[T]) {
 				child = &segmentNode[T]{}
 				current.params = append(current.params, paramEdge[T]{
 					pattern: pattern,
-					capture: pattern.capture,
 					child:   child,
 				})
 				sortParamEdges(current.params)
@@ -353,18 +352,20 @@ func (n *segmentNode[T]) matchPrefixPath(path string, index int) (prefixMatch[T]
 }
 
 func collectParams[T any](entry *routeEntry[T], path string, params Params) Params {
-	if entry.captures == 0 {
+	if entry.captureCount == 0 {
 		return params
 	}
 
-	params = params.ensureCapacity(entry.captures)
+	if entry.captureCount > inlineParams {
+		params = params.ensureCapacity(entry.captureCount)
+	}
 
 	index := 0
 	for i := range entry.patterns {
 		pattern := entry.patterns[i]
 		if pattern.catchAll {
 			if value, ok := matchCatchAllPattern(pattern, path[index:]); ok {
-				params = params.append(pattern.capture, value)
+				params = params.append(entry.captureNames[i], value)
 			}
 			return params
 		}
@@ -372,7 +373,7 @@ func collectParams[T any](entry *routeEntry[T], path string, params Params) Para
 		pathSegment, next := nextPathSegment(path, index)
 		if pattern.param {
 			if value, ok := matchParamPattern(pattern, pathSegment); ok {
-				params = params.append(pattern.capture, value)
+				params = params.append(entry.captureNames[i], value)
 			}
 		}
 		index = next
@@ -555,16 +556,22 @@ func splitTokenSegments(tokens []token) [][]token {
 	return segments
 }
 
-func makeSegmentPatterns(segments [][]token) ([]segmentPattern, int) {
+func makeSegmentPatterns(segments [][]token) ([]segmentPattern, []string, int) {
 	patterns := make([]segmentPattern, len(segments))
-	captures := 0
+	var captureNames []string
+	captureCount := 0
 	for i := range segments {
-		patterns[i] = makeSegment(segments[i])
-		if patterns[i].capture != "" {
-			captures++
+		var capture string
+		patterns[i], capture = makeSegment(segments[i])
+		if capture != "" {
+			if captureNames == nil {
+				captureNames = make([]string, len(segments))
+			}
+			captureNames[i] = capture
+			captureCount++
 		}
 	}
-	return patterns, captures
+	return patterns, captureNames, captureCount
 }
 
 func sameSegmentPattern(a, b segmentPattern) bool {
@@ -786,7 +793,7 @@ func conflictsPatterns(as, bs []segmentPattern) bool {
 }
 
 func hasCatchAllPrefixConflict[T any](a, b *routeEntry[T]) bool {
-	if b.captures == 0 {
+	if b.captureCount == 0 {
 		return false
 	}
 	for i, pattern := range a.patterns {
@@ -813,12 +820,12 @@ type segmentPattern struct {
 	prefix   string
 	suffix   string
 	param    bool
-	capture  string
 }
 
-func makeSegment(tokens []token) segmentPattern {
+func makeSegment(tokens []token) (segmentPattern, string) {
 	var s segmentPattern
 	var b strings.Builder
+	var capture string
 	for _, t := range tokens {
 		switch t.kind {
 		case tokenLiteral:
@@ -830,15 +837,15 @@ func makeSegment(tokens []token) segmentPattern {
 			}
 		case tokenParam:
 			s.param = true
-			s.capture = t.text
+			capture = t.text
 		case tokenCatchAll:
 			s.catchAll = true
-			s.capture = t.text
+			capture = t.text
 		}
 	}
 	s.raw = b.String()
 	s.literal = !s.param && !s.catchAll
-	return s
+	return s, capture
 }
 
 func segmentConflict(a, b segmentPattern) bool {
