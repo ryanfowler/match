@@ -791,6 +791,45 @@ func TestMatchPrefixMatchesRootPrefix(t *testing.T) {
 	}
 }
 
+func TestMatchPrefixEmptyRouteDoesNotMatchNonEmptyPaths(t *testing.T) {
+	var router Router[string]
+	router.Insert("", "empty")
+
+	for _, path := range []string{"/", "/users", "users"} {
+		t.Run(path, func(t *testing.T) {
+			if got, ok := router.MatchPrefix(path); ok {
+				t.Fatalf("MatchPrefix(%q) = value %q rest %q, want miss", path, got.Value, got.Rest)
+			}
+		})
+	}
+}
+
+func TestMatchPrefixEmptyRouteCoexistsWithRootRoute(t *testing.T) {
+	var router Router[string]
+	router.Insert("", "empty")
+	router.Insert("/", "root")
+
+	tests := []struct {
+		path string
+		rest string
+	}{
+		{"/", "/"},
+		{"/users", "/users"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got, ok := router.MatchPrefix(tt.path)
+			if !ok {
+				t.Fatalf("MatchPrefix(%q): not found", tt.path)
+			}
+			if got.Value != "root" || got.Rest != tt.rest {
+				t.Fatalf("MatchPrefix(%q) = value %q rest %q, want root %q", tt.path, got.Value, got.Rest, tt.rest)
+			}
+		})
+	}
+}
+
 func TestMatchPrefixDoesNotMatchPartialSegment(t *testing.T) {
 	var router Router[string]
 	router.Insert("/api", "api")

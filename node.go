@@ -131,7 +131,7 @@ func (n *node[T]) insert(route string, value T) error {
 }
 
 func (n *node[T]) match(route string) (T, Params, bool) {
-	root, index := n.matchRoot(route)
+	root, index, _ := n.matchRoot(route)
 	entry, ok := root.matchPath(route, index)
 	if !ok {
 		var val T
@@ -141,7 +141,7 @@ func (n *node[T]) match(route string) (T, Params, bool) {
 }
 
 func (n *node[T]) matchInto(route string, params Params) (T, Params, bool) {
-	root, index := n.matchRoot(route)
+	root, index, _ := n.matchRoot(route)
 	params = params.reset()
 	entry, ok := root.matchPath(route, index)
 	if !ok {
@@ -169,8 +169,8 @@ func (n *node[T]) matchPrefixInto(path string, params Params) (PrefixMatch[T], b
 }
 
 func (n *node[T]) matchPrefixRoute(path string) (prefixMatch[T], bool) {
-	root, index := n.matchRoot(path)
-	best, ok := root.matchPrefixPath(path, index)
+	root, index, skippedRoot := n.matchRoot(path)
+	best, ok := root.matchPrefixPath(path, index, skippedRoot)
 	if rootMatch, rootOK := n.rootPrefixMatch(path); rootOK {
 		best = betterPrefixMatch(best, rootMatch)
 		ok = true
@@ -197,14 +197,14 @@ func (n *node[T]) rootPrefixMatch(path string) (prefixMatch[T], bool) {
 	}, true
 }
 
-func (n *node[T]) matchRoot(route string) (*segmentNode[T], int) {
+func (n *node[T]) matchRoot(route string) (*segmentNode[T], int, bool) {
 	if route == "" || route[0] != '/' || len(n.root.params) != 0 || len(n.root.catchAll) != 0 {
-		return &n.root, 0
+		return &n.root, 0, false
 	}
 	if child := n.root.staticChild(""); child != nil {
-		return child, 1
+		return child, 1, true
 	}
-	return &n.root, 0
+	return &n.root, 0, false
 }
 
 func (n *node[T]) insertTree(entry *routeEntry[T]) {
@@ -309,9 +309,9 @@ func (m prefixMatch[T]) prefix(path string, params Params) PrefixMatch[T] {
 	}
 }
 
-func (n *segmentNode[T]) matchPrefixPath(path string, index int) (prefixMatch[T], bool) {
+func (n *segmentNode[T]) matchPrefixPath(path string, index int, ignoreValue bool) (prefixMatch[T], bool) {
 	var best prefixMatch[T]
-	if n.value != nil {
+	if !ignoreValue && n.value != nil {
 		best = prefixMatch[T]{
 			entry:     n.value,
 			restIndex: index,
@@ -322,7 +322,8 @@ func (n *segmentNode[T]) matchPrefixPath(path string, index int) (prefixMatch[T]
 	if index >= 0 {
 		segment, next := nextPathSegment(path, index)
 		if child := n.staticChild(segment); child != nil {
-			if candidate, ok := child.matchPrefixPath(path, next); ok {
+			ignoreChildValue := index == 0 && len(path) > 0 && path[0] == '/' && segment == ""
+			if candidate, ok := child.matchPrefixPath(path, next, ignoreChildValue); ok {
 				best = betterPrefixMatch(best, candidate)
 			}
 		}
@@ -331,7 +332,7 @@ func (n *segmentNode[T]) matchPrefixPath(path string, index int) (prefixMatch[T]
 			if _, ok := matchParamPattern(n.params[i].pattern, segment); !ok {
 				continue
 			}
-			if candidate, ok := n.params[i].child.matchPrefixPath(path, next); ok {
+			if candidate, ok := n.params[i].child.matchPrefixPath(path, next, false); ok {
 				best = betterPrefixMatch(best, candidate)
 			}
 		}
