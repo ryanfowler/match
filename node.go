@@ -51,8 +51,6 @@ type token struct {
 
 type routeEntry[T any] struct {
 	route        string
-	normalized   string
-	segments     [][]token
 	patterns     []segmentPattern
 	captureNames []string
 	captureCount int
@@ -98,8 +96,6 @@ func (n *node[T]) insert(route string, value T) error {
 	patterns, captureNames, captureCount := makeSegmentPatterns(segments)
 	entry := &routeEntry[T]{
 		route:        unescapeBraces(route),
-		normalized:   normalized,
-		segments:     segments,
 		patterns:     patterns,
 		captureNames: captureNames,
 		captureCount: captureCount,
@@ -109,11 +105,11 @@ func (n *node[T]) insert(route string, value T) error {
 	if n.normalized == nil {
 		n.normalized = make(map[string]string)
 	}
-	if existing, ok := n.normalized[entry.normalized]; ok {
+	if existing, ok := n.normalized[normalized]; ok {
 		return &ConflictError{Route: entry.route, With: existing}
 	}
 
-	if entry.captureCount != 0 || n.root.conflictsWithCatchAllStatic(entry.segments, 0) {
+	if entry.captureCount != 0 || n.root.conflictsWithCatchAllStatic(segments, 0) {
 		for _, existing := range n.routes {
 			if entry.captureCount == 0 && existing.captureCount == 0 {
 				continue
@@ -124,7 +120,7 @@ func (n *node[T]) insert(route string, value T) error {
 		}
 	}
 
-	n.normalized[entry.normalized] = entry.route
+	n.normalized[normalized] = entry.route
 	n.routes = append(n.routes, entry)
 	n.insertTree(entry)
 	return nil
@@ -209,9 +205,7 @@ func (n *node[T]) matchRoot(route string) (*segmentNode[T], int, bool) {
 
 func (n *node[T]) insertTree(entry *routeEntry[T]) {
 	current := &n.root
-	for i := range entry.segments {
-		pattern := entry.patterns[i]
-
+	for i, pattern := range entry.patterns {
 		if pattern.catchAll {
 			current.catchAll = append(current.catchAll, catchAllEdge[T]{
 				pattern: pattern,
@@ -246,7 +240,7 @@ func (n *node[T]) insertTree(entry *routeEntry[T]) {
 			current = child
 		}
 
-		if i == len(entry.segments)-1 {
+		if i == len(entry.patterns)-1 {
 			current.value = entry
 		}
 	}
@@ -420,7 +414,7 @@ func remainingPrefixPath(path string, index int) string {
 }
 
 func moreSpecificRoute[T any](a, b *routeEntry[T]) bool {
-	for i := 0; i < len(a.segments) && i < len(b.segments); i++ {
+	for i := 0; i < len(a.patterns) && i < len(b.patterns); i++ {
 		ap := a.patterns[i]
 		bp := b.patterns[i]
 		if ap.literal != bp.literal {
@@ -441,7 +435,7 @@ func moreSpecificRoute[T any](a, b *routeEntry[T]) bool {
 			return len(ap.prefix) > len(bp.prefix)
 		}
 	}
-	return len(a.segments) > len(b.segments)
+	return len(a.patterns) > len(b.patterns)
 }
 
 func (n *segmentNode[T]) staticChild(segment string) *segmentNode[T] {
