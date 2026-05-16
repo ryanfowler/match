@@ -780,21 +780,25 @@ func conflictsPatterns(as, bs []segmentPattern) bool {
 	if len(as) != len(bs) {
 		return false
 	}
+	ambiguous := false
 	for i := range as {
 		if as[i].catchAll || bs[i].catchAll {
+			if !segmentMayOverlap(as[i], bs[i]) {
+				return false
+			}
 			if !as[i].literal && !bs[i].literal {
-				return true
+				ambiguous = true
 			}
 			continue
-		}
-		if segmentConflict(as[i], bs[i]) {
-			return true
 		}
 		if !segmentMayOverlap(as[i], bs[i]) {
 			return false
 		}
+		if segmentConflict(as[i], bs[i]) {
+			ambiguous = true
+		}
 	}
-	return false
+	return ambiguous
 }
 
 func hasCatchAllPrefixConflict[T any](a, b *routeEntry[T]) bool {

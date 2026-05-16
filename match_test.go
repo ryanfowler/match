@@ -363,6 +363,59 @@ func TestMatchitConflicts(t *testing.T) {
 	}
 }
 
+func TestMatchitAllowsDisjointAmbiguousSegments(t *testing.T) {
+	tests := []struct {
+		name    string
+		first   string
+		second  string
+		matches []matchCase
+	}{
+		{
+			name:   "later static segment disambiguates affixed params",
+			first:  "/files/{name}.json/a",
+			second: "/files/report.{ext}/b",
+			matches: []matchCase{
+				{"/files/report.json/a", "/files/{name}.json/a", ParamsOf(Param{"name", "report"})},
+				{"/files/report.json/b", "/files/report.{ext}/b", ParamsOf(Param{"ext", "json"})},
+			},
+		},
+		{
+			name:   "incompatible catch all prefixes",
+			first:  "/static/css-{*path}",
+			second: "/static/js-{*path}",
+			matches: []matchCase{
+				{"/static/css-app.css", "/static/css-{*path}", ParamsOf(Param{"path", "app.css"})},
+				{"/static/js-app.js", "/static/js-{*path}", ParamsOf(Param{"path", "app.js"})},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var router Router[string]
+			if err := router.TryInsert(tt.first, tt.first); err != nil {
+				t.Fatalf("insert %q: %v", tt.first, err)
+			}
+			if err := router.TryInsert(tt.second, tt.second); err != nil {
+				t.Fatalf("insert %q error = %v, want nil", tt.second, err)
+			}
+
+			for _, m := range tt.matches {
+				got, params, ok := router.Match(m.path)
+				if !ok {
+					t.Fatalf("match %q: not found", m.path)
+				}
+				if got != m.route {
+					t.Fatalf("match %q route = %q, want %q", m.path, got, m.route)
+				}
+				if !paramsEqual(params, m.params) {
+					t.Fatalf("match %q params = %#v, want %#v", m.path, params.All(), m.params.All())
+				}
+			}
+		})
+	}
+}
+
 func TestCatchAllPrefixConflictsWithOverlappingDynamicRoutes(t *testing.T) {
 	tests := []struct {
 		name   string
