@@ -202,6 +202,7 @@ func BenchmarkInsert(b *testing.B) {
 		{name: "Mixed", routes: mixedBenchmarkRoutes()},
 		{name: "Many100", routes: generatedBenchmarkRoutes(100)},
 		{name: "Many1000", routes: generatedBenchmarkRoutes(1000)},
+		{name: "DynamicMany1000", routes: generatedDynamicBenchmarkRoutes(1000)},
 	}
 
 	for _, bm := range benchmarks {
@@ -262,6 +263,14 @@ func generatedBenchmarkRoutes(n int) []string {
 	routes := make([]string, 0, n)
 	for i := 0; i < n; i++ {
 		routes = append(routes, "/route/"+strconv.Itoa(i)+"/detail")
+	}
+	return routes
+}
+
+func generatedDynamicBenchmarkRoutes(n int) []string {
+	routes := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		routes = append(routes, "/route-"+strconv.Itoa(i)+"/{id}")
 	}
 	return routes
 }
