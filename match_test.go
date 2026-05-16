@@ -363,6 +363,76 @@ func TestMatchitConflicts(t *testing.T) {
 	}
 }
 
+func TestCatchAllPrefixConflictsWithOverlappingDynamicRoutes(t *testing.T) {
+	tests := []struct {
+		name   string
+		first  string
+		second string
+	}{
+		{
+			name:   "catch all before dynamic",
+			first:  "/src/foo/{*path}",
+			second: "/src/{id}/bar",
+		},
+		{
+			name:   "dynamic before catch all",
+			first:  "/src/{id}/bar",
+			second: "/src/foo/{*path}",
+		},
+		{
+			name:   "catch all segment prefix before dynamic",
+			first:  "/src/foo{*path}",
+			second: "/src/{id}/bar",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var router Router[string]
+			if err := router.TryInsert(tt.first, tt.first); err != nil {
+				t.Fatalf("insert %q: %v", tt.first, err)
+			}
+			var conflict *ConflictError
+			if err := router.TryInsert(tt.second, tt.second); !errors.As(err, &conflict) {
+				t.Fatalf("insert %q error = %v, want conflict", tt.second, err)
+			}
+			if conflict.With != tt.first {
+				t.Fatalf("conflict with = %q, want %q", conflict.With, tt.first)
+			}
+		})
+	}
+}
+
+func TestCatchAllPrefixAllowsStaticAndEmptyRemainderRoutes(t *testing.T) {
+	t.Run("static route under catch all", func(t *testing.T) {
+		var router Router[string]
+		if err := router.TryInsert("/src/foo/{*path}", "catch"); err != nil {
+			t.Fatalf("insert catch all: %v", err)
+		}
+		if err := router.TryInsert("/src/foo/bar", "static"); err != nil {
+			t.Fatalf("insert static route error = %v, want nil", err)
+		}
+
+		got, _, ok := router.Match("/src/foo/bar")
+		if !ok {
+			t.Fatal("match static route: not found")
+		}
+		if got != "static" {
+			t.Fatalf("value = %q, want static", got)
+		}
+	})
+
+	t.Run("dynamic route with empty catch all remainder", func(t *testing.T) {
+		var router Router[string]
+		if err := router.TryInsert("/src/foo/{*path}", "catch"); err != nil {
+			t.Fatalf("insert catch all: %v", err)
+		}
+		if err := router.TryInsert("/src/{id}/", "dynamic"); err != nil {
+			t.Fatalf("insert dynamic route error = %v, want nil", err)
+		}
+	})
+}
+
 func TestConflictErrorString(t *testing.T) {
 	err := &ConflictError{Route: "/new", With: "/existing"}
 	want := "insertion failed due to conflict with previously registered route: /existing"
