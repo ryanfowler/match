@@ -2,13 +2,30 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/ryanfowler/match.svg)](https://pkg.go.dev/github.com/ryanfowler/match)
 
-`match` is a minimal, high-performance generic path router for Go. It maps path
-patterns to values you provide, then returns the matched value and any captured
-parameters.
+`match` is a minimal, high-performance generic path router for Go. It maps
+slash-separated route patterns to values you provide, then returns the matched
+value and any captured parameters.
 
-It is useful when you want routing behavior without pulling in a full HTTP
-framework: command dispatch, API route lookup, asset path handling, or any other
-place where slash-separated strings need to resolve to typed application data.
+It is intentionally narrower than an HTTP framework. It does not know about
+methods, middleware, redirects, request objects, URL decoding, or path cleaning.
+That makes it useful anywhere a path-like string needs to resolve to typed
+application data: HTTP handler lookup, command dispatch, API route tables, asset
+paths, virtual filesystems, or nested routers.
+
+Key properties:
+
+- The zero value of `Router[T]` is ready to use.
+- Routes can store any Go value: handlers, metadata, enum-like strings, or your
+  own structs.
+- Matching is deterministic. Literal routes beat dynamic routes, more-specific
+  dynamic segments beat less-specific ones, and catch-all routes are considered
+  last.
+- Invalid, duplicate, and ambiguous route definitions are rejected at insertion
+  time.
+- Parameter storage is allocation-conscious: up to four captures are stored
+  inline, and `MatchInto` / `MatchPrefixInto` let hot paths reuse storage.
+- After registration, a router can be shared by multiple goroutines for
+  matching.
 
 ## Install
 
@@ -109,6 +126,21 @@ Use `MatchPrefixInto` to reuse parameter storage for prefix matches.
 After routes are registered, a router may be used by multiple goroutines for
 matching. If routes are inserted while other goroutines are using the router,
 synchronize access around the router.
+
+## Path Semantics
+
+`match` treats routes and paths as plain strings with `/` as the segment
+separator. It does not normalize either side before matching:
+
+- Absolute and relative paths are distinct: `/users/{id}` does not match
+  `users/42`.
+- Empty segments are significant: `/a//b` is different from `/a/b`.
+- Trailing slashes are significant: `/a/` is different from `/a`.
+- Escaped URL bytes are not decoded, and `.` / `..` segments are not cleaned.
+
+This keeps the package independent from any specific transport. If you are
+matching `net/http` requests, apply whatever URL or path normalization your
+application wants before calling `Match`.
 
 ## Route Grammar
 
@@ -264,6 +296,39 @@ if errors.As(err, &conflict) {
 
 Dynamic routes also conflict when the same path could select either route, such
 as `/user_{name}` and `/user_{id}`.
+
+## Internals
+
+Routes are parsed once during insertion. The parser turns a route string into
+tokens, splits those tokens into segment patterns, records capture names in
+route order, and builds a normalized route shape used to detect duplicates even
+when parameter names differ.
+
+The matcher is a segment trie. Each node can have static edges, parameter edges,
+catch-all edges, and an optional route value. Static edges are tried first.
+Parameter edges are sorted by specificity, with more literal text before less
+literal text, so `/user-{id}` is preferred over `/{id}` for `"/user-42"`.
+Catch-all edges are checked after static and parameter edges. Nodes with many
+static children add a small lookup map while still preserving compact storage
+for small route tables.
+
+`TryInsert` also maintains a conflict index. Dynamic routes are grouped by
+segment count and first definitely-static segment, with separate tracking for
+catch-all routes. This catches ambiguous definitions before they can make match
+results depend on insertion order. For example, `/x/{id}/bar` conflicts with
+`/x/{name}/bar`, while `/files/{name}.json/a` and `/files/report.{ext}/b` can
+coexist because later segments disambiguate them.
+
+Parameters are collected after the winning route is selected, using the
+canonical route entry's capture names. `Params` stores up to four captures
+inline and grows to a slice only when needed. `MatchInto` and
+`MatchPrefixInto` reset and reuse a caller-provided `Params` value, which avoids
+heap allocation for common hot-path routing loops.
+
+Prefix matching uses the same trie and route grammar as exact matching. It
+tracks the best whole-segment prefix while walking the tree, chooses the route
+that consumes the most path, and returns the remaining path as `Rest`. When a
+prefix consumes the full path, `Rest` is `/`.
 
 ## Development
 
