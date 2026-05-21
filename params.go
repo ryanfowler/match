@@ -45,6 +45,24 @@ func ParamsOf(params ...Param) Params {
 	return p
 }
 
+// Reset returns p with no captured parameters while preserving reusable heap
+// storage.
+func (p Params) Reset() Params {
+	return p.reset()
+}
+
+// Grow returns p with enough reusable storage for capacity parameters.
+//
+// Capacity values of four or less use the inline storage built into Params.
+func (p Params) Grow(capacity int) Params {
+	return p.ensureCapacity(capacity)
+}
+
+// Append returns p with a captured parameter appended.
+func (p Params) Append(key, val string) Params {
+	return p.append(key, val)
+}
+
 // Merge returns a Params value containing a followed by b.
 //
 // Parameter keys are not deduplicated; when the same key appears in both
