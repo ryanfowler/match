@@ -114,6 +114,8 @@ it needs during insertion. The methods delegate directly to the internal root:
   remaining path.
 - `MatchPrefixInto(path, params)` combines prefix matching with reusable
   parameter storage.
+- `Clone()` returns an independent copy of the router's internal route table,
+  trie, and conflict index.
 
 `PrefixMatch[T]` is the public result type for prefix matching:
 

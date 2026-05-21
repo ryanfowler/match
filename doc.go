@@ -65,7 +65,9 @@
 // caller-provided Params value as reusable storage. MatchPrefix and
 // MatchPrefixInto return the best whole-segment route prefix plus the remaining
 // path, which is useful for mounts and nested dispatch. Rest is / when a prefix
-// match consumes the full path.
+// match consumes the full path. Clone returns an independent copy of a Router's
+// routing state for cases where a route table needs to be extended without
+// mutating the original.
 //
 // # Matching Behavior and Conflicts
 //

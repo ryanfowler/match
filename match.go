@@ -9,6 +9,14 @@ type Router[T any] struct {
 	root node[T]
 }
 
+// Clone returns a Router containing a deep copy of r's routing state.
+//
+// Future inserts into the returned Router do not mutate r. Stored values are
+// copied by assignment.
+func (r *Router[T]) Clone() Router[T] {
+	return Router[T]{root: r.root.clone()}
+}
+
 // PrefixMatch contains the result of a successful prefix match.
 //
 // Rest is the remaining path after the matched prefix. It is always "/" when
