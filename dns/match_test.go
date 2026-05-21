@@ -48,10 +48,40 @@ func TestMatchMissesMalformedHostnames(t *testing.T) {
 	router.Insert("example.com", "apex")
 	router.Insert("{tenant}.example.com", "tenant")
 
-	for _, host := range []string{"", ".", "example..com", ".example.com", strings.Repeat("a", 64) + ".com"} {
+	for _, host := range []string{"", ".", "example..com", ".example.com", strings.Repeat("a", 64) + ".com", hostnameWithLabelLengths(63, 63, 63, 62)} {
 		if got, _, ok := router.Match(host); ok {
 			t.Fatalf("match %q = %q, want miss", host, got)
 		}
+	}
+}
+
+func TestHostnameLengthBoundaries(t *testing.T) {
+	maxHost := hostnameWithLabelLengths(63, 63, 63, 61)
+	tooLongHost := hostnameWithLabelLengths(63, 63, 63, 62)
+
+	var router Router[string]
+	if err := router.TryInsert(maxHost, "max"); err != nil {
+		t.Fatalf("insert max length hostname: %v", err)
+	}
+	if got, _, ok := router.Match(maxHost + "."); !ok || got != "max" {
+		t.Fatalf("match max length hostname = %q, %v; want max true", got, ok)
+	}
+	if err := router.TryInsert(tooLongHost, "too-long"); !errors.Is(err, ErrInvalidHostname) {
+		t.Fatalf("insert too-long hostname error = %v, want %v", err, ErrInvalidHostname)
+	}
+
+	maxDynamicSuffix := hostnameWithLabelLengths(63, 63, 63, 59)
+	tooLongDynamicSuffix := hostnameWithLabelLengths(63, 63, 63, 60)
+
+	var dynamic Router[string]
+	if err := dynamic.TryInsert("{tenant}."+maxDynamicSuffix, "max-dynamic"); err != nil {
+		t.Fatalf("insert max dynamic hostname: %v", err)
+	}
+	if got, params, ok := dynamic.Match("x." + maxDynamicSuffix); !ok || got != "max-dynamic" || !paramsEqual(params, ParamsOf(Param{"tenant", "x"})) {
+		t.Fatalf("match max dynamic hostname = %q %#v %v; want max-dynamic tenant=x true", got, params.All(), ok)
+	}
+	if err := dynamic.TryInsert("{tenant}."+tooLongDynamicSuffix, "too-long"); !errors.Is(err, ErrInvalidHostname) {
+		t.Fatalf("insert too-long dynamic hostname error = %v, want %v", err, ErrInvalidHostname)
 	}
 }
 
@@ -99,6 +129,34 @@ func TestPrefixedCatchAll(t *testing.T) {
 
 	if got, _, ok := router.Match("api.us.example.com"); ok {
 		t.Fatalf("match without prefix = %q, want miss", got)
+	}
+
+	if got, _, ok := router.Match("svc-.us.example.com"); ok {
+		t.Fatalf("match empty first catch-all label = %q, want miss", got)
+	}
+}
+
+func TestPrefixedCatchAllAllowsRoutesWithEmptyFirstCapture(t *testing.T) {
+	var router Router[string]
+	router.Insert("svc-{*subdomain}.example.com", "svc")
+	if err := router.TryInsert("svc-.{region}.example.com", "region"); err != nil {
+		t.Fatalf("insert route outside prefixed catch-all language: %v", err)
+	}
+
+	got, params, ok := router.Match("svc-api.us.example.com")
+	if !ok {
+		t.Fatal("match prefixed catch-all: not found")
+	}
+	if got != "svc" || !paramsEqual(params, ParamsOf(Param{"subdomain", "api.us"})) {
+		t.Fatalf("prefixed catch-all = %q %#v, want svc subdomain=api.us", got, params.All())
+	}
+
+	got, params, ok = router.Match("svc-.us.example.com")
+	if !ok {
+		t.Fatal("match route with empty first catch-all capture: not found")
+	}
+	if got != "region" || !paramsEqual(params, ParamsOf(Param{"region", "us"})) {
+		t.Fatalf("empty first capture route = %q %#v, want region region=us", got, params.All())
 	}
 }
 
@@ -152,6 +210,8 @@ func TestInsertErrors(t *testing.T) {
 		{"empty middle label", "example..com", ErrInvalidHostname},
 		{"leading dot", ".example.com", ErrInvalidHostname},
 		{"long literal label", strings.Repeat("a", 64) + ".com", ErrInvalidHostname},
+		{"long hostname", hostnameWithLabelLengths(63, 63, 63, 62), ErrInvalidHostname},
+		{"long dynamic minimum hostname", "{tenant}." + hostnameWithLabelLengths(63, 63, 63, 60), ErrInvalidHostname},
 		{"unnamed param", "{}.example.com", ErrInvalidParam},
 		{"unnamed catchall", "{*}.example.com", ErrInvalidParam},
 		{"double params", "{foo}{bar}.example.com", ErrInvalidParamLabel},
@@ -283,6 +343,7 @@ func TestMatchSuffixChoosesLongestSuffix(t *testing.T) {
 		{"api.example.com", "tenant", "", ParamsOf(Param{"tenant", "api"})},
 		{"foo.api.example.com", "tenant", "foo", ParamsOf(Param{"tenant", "api"})},
 		{"foo.v1.example.com", "v1", "foo", Params{}},
+		{"Foo.V1.Example.Com.", "v1", "Foo", Params{}},
 		{"foo.bar.example.com", "tenant", "foo", ParamsOf(Param{"tenant", "bar"})},
 	}
 
@@ -332,6 +393,7 @@ func TestRouterCloneCopiesState(t *testing.T) {
 	var router Router[string]
 	router.Insert("example.com", "zone")
 	router.Insert("{tenant}.example.com", "tenant")
+	router.Insert("api-{region}.example.com", "region")
 	for i := 0; i < 12; i++ {
 		router.Insert(fmt.Sprintf("static-%02d.test", i), fmt.Sprintf("static-%02d", i))
 	}
@@ -351,6 +413,9 @@ func TestRouterCloneCopiesState(t *testing.T) {
 	if got, _, ok := clone.Match("static-11.test"); !ok || got != "static-11" {
 		t.Fatalf("clone indexed static = %q, %v; want static-11 true", got, ok)
 	}
+	if got, _, ok := clone.Match("STATIC-11.TEST"); !ok || got != "static-11" {
+		t.Fatalf("clone uppercase indexed static = %q, %v; want static-11 true", got, ok)
+	}
 	if got, _, ok := clone.Match("clone-only.test"); !ok || got != "clone" {
 		t.Fatalf("clone-only = %q, %v; want clone true", got, ok)
 	}
@@ -362,6 +427,11 @@ func TestRouterCloneCopiesState(t *testing.T) {
 	}
 	if got, _, ok := clone.Match("original-only.test"); ok {
 		t.Fatalf("clone matched original-only with value %q", got)
+	}
+
+	var conflict *ConflictError
+	if err := clone.TryInsert("{service}-prod.example.com", "conflict"); !errors.As(err, &conflict) {
+		t.Fatalf("clone insert ambiguous dynamic route error = %v, want conflict", err)
 	}
 }
 
@@ -452,4 +522,15 @@ func paramsEqual(a, b Params) bool {
 		}
 	}
 	return true
+}
+
+func hostnameWithLabelLengths(lengths ...int) string {
+	var b strings.Builder
+	for i, length := range lengths {
+		if i > 0 {
+			b.WriteByte('.')
+		}
+		b.WriteString(strings.Repeat("a", length))
+	}
+	return b.String()
 }
