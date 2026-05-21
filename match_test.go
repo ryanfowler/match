@@ -238,6 +238,34 @@ func TestMatchStaticChildrenAfterIndexThreshold(t *testing.T) {
 	}
 }
 
+func TestLiteralRouteDoesNotCollideWithDynamicNormalizedShape(t *testing.T) {
+	var router Router[string]
+	router.Insert("P0;", "static")
+	router.Insert("{value}", "param")
+
+	got, params, ok := router.Match("P0;")
+	if !ok {
+		t.Fatal("match literal route: not found")
+	}
+	if got != "static" {
+		t.Fatalf("match literal route = %q, want static", got)
+	}
+	if params.Len() != 0 {
+		t.Fatalf("literal route params length = %d, want 0", params.Len())
+	}
+
+	got, params, ok = router.Match("other")
+	if !ok {
+		t.Fatal("match dynamic route: not found")
+	}
+	if got != "param" {
+		t.Fatalf("match dynamic route = %q, want param", got)
+	}
+	if !paramsEqual(params, ParamsOf(Param{"value", "other"})) {
+		t.Fatalf("dynamic route params = %#v, want value=other", params.All())
+	}
+}
+
 func TestMatchPrefixedCatchAll(t *testing.T) {
 	var router Router[string]
 	router.Insert("/static/prefix-{*path}", "catch-all")

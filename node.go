@@ -106,6 +106,49 @@ type catchAllEdge[T any] struct {
 }
 
 func (n *node[T]) insert(route string, value T) error {
+	if !strings.ContainsAny(route, "{}") {
+		return n.insertLiteral(route, value)
+	}
+	return n.insertDynamic(route, value)
+}
+
+func (n *node[T]) insertLiteral(route string, value T) error {
+	patterns := literalSegmentPatterns(route)
+	firstStaticSegment, hasFirstStaticSegment := firstDefinitelyStaticSegment(patterns)
+	entry := &routeEntry[T]{
+		route:                 route,
+		patterns:              patterns,
+		segmentCount:          len(patterns),
+		order:                 len(n.routes),
+		firstStaticSegment:    firstStaticSegment,
+		hasFirstStaticSegment: hasFirstStaticSegment,
+		value:                 value,
+	}
+	normalized := normalizedStaticLiteral(route)
+	catchAllStaticConflict := n.root.conflictsWithCatchAllStaticPatterns(patterns, 0)
+
+	if n.normalized == nil {
+		n.normalized = make(map[string]string)
+	}
+	if existing, ok := n.normalized[normalized]; ok {
+		return &ConflictError{Route: entry.route, With: existing}
+	}
+
+	if entry.captureCount != 0 || catchAllStaticConflict {
+		if existing := n.conflictIndex.findConflict(entry); existing != nil {
+			return &ConflictError{Route: entry.route, With: existing.route}
+		}
+	}
+
+	n.normalized[normalized] = entry.route
+	n.routes = append(n.routes, entry)
+	n.conflictIndex.add(entry)
+	n.insertTree(entry)
+	n.refreshRootPrefix(entry)
+	return nil
+}
+
+func (n *node[T]) insertDynamic(route string, value T) error {
 	tokens, normalized, err := parseRoute(route)
 	if err != nil {
 		return err
@@ -146,6 +189,10 @@ func (n *node[T]) insert(route string, value T) error {
 	n.insertTree(entry)
 	n.refreshRootPrefix(entry)
 	return nil
+}
+
+func normalizedStaticLiteral(route string) string {
+	return "S" + route
 }
 
 func (n *node[T]) refreshRootPrefix(entry *routeEntry[T]) {
@@ -372,13 +419,23 @@ func (n *segmentNode[T]) matchPath(path string, index int) (*routeEntry[T], bool
 	}
 
 	for i := range n.params {
-		if _, ok := matchParamPattern(n.params[i].pattern, segment); !ok {
+		pattern := n.params[i].pattern
+		if pattern.prefix == "" && pattern.suffix == "" {
+			if segment == "" {
+				continue
+			}
+		} else if _, ok := matchAffixedParamPattern(pattern, segment); !ok {
 			continue
 		}
 		if entry, ok := n.params[i].child.matchPath(path, next); ok {
 			bestEntry := entry
 			for j := i + 1; j < len(n.params); j++ {
-				if _, ok := matchParamPattern(n.params[j].pattern, segment); !ok {
+				pattern := n.params[j].pattern
+				if pattern.prefix == "" && pattern.suffix == "" {
+					if segment == "" {
+						continue
+					}
+				} else if _, ok := matchAffixedParamPattern(pattern, segment); !ok {
 					continue
 				}
 				entry, ok := n.params[j].child.matchPath(path, next)
@@ -433,7 +490,12 @@ func (n *segmentNode[T]) matchPrefixPath(path string, index int, ignoreValue boo
 		}
 
 		for i := range n.params {
-			if _, ok := matchParamPattern(n.params[i].pattern, segment); !ok {
+			pattern := n.params[i].pattern
+			if pattern.prefix == "" && pattern.suffix == "" {
+				if segment == "" {
+					continue
+				}
+			} else if _, ok := matchAffixedParamPattern(pattern, segment); !ok {
 				continue
 			}
 			if candidate, ok := n.params[i].child.matchPrefixPath(path, next, false); ok {
@@ -486,7 +548,7 @@ func collectParams[T any](entry *routeEntry[T], path string, params Params) Para
 				if pathSegment != "" {
 					params = params.append(entry.captureNames[i], pathSegment)
 				}
-			} else if value, ok := matchParamPattern(pattern, pathSegment); ok {
+			} else if value, ok := matchAffixedParamPattern(pattern, pathSegment); ok {
 				params = params.append(entry.captureNames[i], value)
 			}
 		}
@@ -503,7 +565,17 @@ func betterPrefixMatch[T any](best, candidate prefixMatch[T]) prefixMatch[T] {
 	if best.entry == nil || candidate.consumed > best.consumed {
 		return candidate
 	}
-	if candidate.consumed == best.consumed && moreSpecificRoute(candidate.entry, best.entry) {
+	if candidate.consumed == best.consumed {
+		return betterEqualPrefixMatch(best, candidate)
+	}
+	return best
+}
+
+// Keep the uncommon specificity tie-break out of betterPrefixMatch's hot path.
+//
+//go:noinline
+func betterEqualPrefixMatch[T any](best, candidate prefixMatch[T]) prefixMatch[T] {
+	if moreSpecificRoute(candidate.entry, best.entry) {
 		return candidate
 	}
 	return best
@@ -602,6 +674,25 @@ func (n *segmentNode[T]) conflictsWithCatchAllStatic(segments [][]token, index i
 	return child.conflictsWithCatchAllStatic(segments, index+1)
 }
 
+func (n *segmentNode[T]) conflictsWithCatchAllStaticPatterns(patterns []segmentPattern, index int) bool {
+	if len(n.catchAll) > 0 {
+		return true
+	}
+	if index == len(patterns) {
+		return false
+	}
+
+	pattern := patterns[index]
+	if !pattern.literal {
+		return false
+	}
+	child := n.staticChild(pattern.raw)
+	if child == nil {
+		return false
+	}
+	return child.conflictsWithCatchAllStaticPatterns(patterns, index+1)
+}
+
 func staticSegmentRaw(segment []token) (string, bool) {
 	if len(segment) == 0 {
 		return "", true
@@ -631,6 +722,19 @@ func nextPathSegment(path string, index int) (string, int) {
 		}
 	}
 	return path[index:], -1
+}
+
+func literalSegmentPatterns(route string) []segmentPattern {
+	patterns := make([]segmentPattern, 0, strings.Count(route, "/")+1)
+	start := 0
+	for i := 0; i < len(route); i++ {
+		if route[i] != '/' {
+			continue
+		}
+		patterns = append(patterns, segmentPattern{raw: route[start:i], literal: true})
+		start = i + 1
+	}
+	return append(patterns, segmentPattern{raw: route[start:], literal: true})
 }
 
 func splitTokenSegments(tokens []token) [][]token {
@@ -751,11 +855,7 @@ func paramEdgeLess[T any](a, b paramEdge[T]) bool {
 	return len(a.pattern.prefix) > len(b.pattern.prefix)
 }
 
-func matchParamPattern(pattern segmentPattern, segment string) (string, bool) {
-	if pattern.prefix == "" && pattern.suffix == "" {
-		return segment, segment != ""
-	}
-
+func matchAffixedParamPattern(pattern segmentPattern, segment string) (string, bool) {
 	if !strings.HasPrefix(segment, pattern.prefix) || !strings.HasSuffix(segment, pattern.suffix) {
 		return "", false
 	}
@@ -785,10 +885,6 @@ func matchCatchAllPattern(pattern segmentPattern, rest string) (string, bool) {
 }
 
 func parseRoute(route string) ([]token, string, error) {
-	if !strings.ContainsAny(route, "{}") {
-		return []token{{kind: tokenLiteral, text: route}}, normalizedLiteral(route), nil
-	}
-
 	tokens := make([]token, 0, countRouteTokens(route))
 	var normalized strings.Builder
 	var literal strings.Builder
@@ -870,16 +966,6 @@ func parseRoute(route string) ([]token, string, error) {
 	flushLiteral()
 
 	return tokens, normalized.String(), nil
-}
-
-func normalizedLiteral(literal string) string {
-	var normalized strings.Builder
-	normalized.Grow(len(literal) + 8)
-	normalized.WriteByte('L')
-	normalized.WriteString(strconv.Itoa(len(literal)))
-	normalized.WriteByte(':')
-	normalized.WriteString(literal)
-	return normalized.String()
 }
 
 func countRouteTokens(route string) int {
