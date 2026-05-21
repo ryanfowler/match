@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	maxHostnameLen = 253
-	maxLabelLen    = 63
+	maxHostnameLen      = 253
+	maxLabelLen         = 63
+	inlineParamCapacity = 4
 )
 
 var (
@@ -61,22 +62,35 @@ type token struct {
 }
 
 type routeEntry[T any] struct {
-	pattern            string
-	labels             []labelPattern
-	captureNames       []string
-	captureCount       int
-	labelCount         int
-	order              int
-	singleCaptureLabel uint32
-	hasCatchAll        bool
-	value              T
+	pattern             string
+	labels              []labelPattern
+	captureNames        []string
+	captureCount        int
+	labelCount          int
+	order               int
+	firstStaticLabel    string
+	singleCaptureLabel  uint32
+	hasFirstStaticLabel bool
+	hasCatchAll         bool
+	value               T
 }
 
 type node[T any] struct {
-	routes         []*routeEntry[T]
-	conflictRoutes []*routeEntry[T]
-	normalized     map[string]string
-	root           labelNode[T]
+	routes        []*routeEntry[T]
+	normalized    map[string]string
+	conflictIndex routeConflictIndex[T]
+	root          labelNode[T]
+}
+
+type routeConflictIndex[T any] struct {
+	byLabelCount map[int]*routeConflictBucket[T]
+	catchAll     routeConflictBucket[T]
+}
+
+type routeConflictBucket[T any] struct {
+	all      []*routeEntry[T]
+	static   map[string][]*routeEntry[T]
+	wildcard []*routeEntry[T]
 }
 
 type labelNode[T any] struct {
@@ -121,8 +135,11 @@ func (n *node[T]) clone() node[T] {
 	var cloned node[T]
 	entries := make(map[*routeEntry[T]]*routeEntry[T], len(n.routes))
 	cloned.routes = cloneRouteEntries(n.routes, entries)
-	cloned.conflictRoutes = cloneConflictRoutes(n.conflictRoutes, entries)
 	cloned.normalized = maps.Clone(n.normalized)
+
+	for _, entry := range cloned.routes {
+		cloned.conflictIndex.add(entry)
+	}
 
 	nodes := make(map[*labelNode[T]]*labelNode[T])
 	cloneLabelNodeInto(&n.root, &cloned.root, entries, nodes)
@@ -143,18 +160,6 @@ func cloneRouteEntries[T any](routes []*routeEntry[T], entries map[*routeEntry[T
 		clonedEntry.captureNames = slices.Clone(entry.captureNames)
 		clonedRoutes[i] = clonedEntry
 		entries[entry] = clonedEntry
-	}
-	return clonedRoutes
-}
-
-func cloneConflictRoutes[T any](routes []*routeEntry[T], entries map[*routeEntry[T]]*routeEntry[T]) []*routeEntry[T] {
-	if len(routes) == 0 {
-		return nil
-	}
-
-	clonedRoutes := make([]*routeEntry[T], len(routes))
-	for i, entry := range routes {
-		clonedRoutes[i] = entries[entry]
 	}
 	return clonedRoutes
 }
@@ -217,18 +222,14 @@ func (n *node[T]) insert(pattern string, value T) error {
 	}
 
 	if entry.captureCount != 0 {
-		for _, existing := range n.conflictRoutes {
-			if conflictsEntries(existing, entry) {
-				return &ConflictError{Pattern: entry.pattern, With: existing.pattern}
-			}
+		if existing := n.conflictIndex.findConflict(entry); existing != nil {
+			return &ConflictError{Pattern: entry.pattern, With: existing.pattern}
 		}
 	}
 
 	n.normalized[normalized] = entry.pattern
 	n.routes = append(n.routes, entry)
-	if entry.captureCount != 0 {
-		n.conflictRoutes = append(n.conflictRoutes, entry)
-	}
+	n.conflictIndex.add(entry)
 	n.insertTree(entry)
 	return nil
 }
@@ -239,23 +240,106 @@ func makeRouteEntry[T any](pattern string, value T, order int) (*routeEntry[T], 
 		return nil, "", err
 	}
 
+	firstStaticLabel, hasFirstStaticLabel := firstDefinitelyStaticLabel(labels)
 	entry := &routeEntry[T]{
-		pattern:            canonicalPattern,
-		labels:             labels,
-		captureNames:       captureNames,
-		singleCaptureLabel: uint32(singleCaptureLabel),
-		captureCount:       captureCount,
-		labelCount:         len(labels),
-		order:              order,
-		hasCatchAll:        hasCatchAll(labels),
-		value:              value,
+		pattern:             canonicalPattern,
+		labels:              labels,
+		captureNames:        captureNames,
+		singleCaptureLabel:  uint32(singleCaptureLabel),
+		captureCount:        captureCount,
+		labelCount:          len(labels),
+		order:               order,
+		firstStaticLabel:    firstStaticLabel,
+		hasFirstStaticLabel: hasFirstStaticLabel,
+		hasCatchAll:         hasCatchAll(labels),
+		value:               value,
 	}
 
 	return entry, normalizedLabels(labels), nil
 }
 
+func (i *routeConflictIndex[T]) add(entry *routeEntry[T]) {
+	if entry.captureCount == 0 {
+		return
+	}
+	if i.byLabelCount == nil {
+		i.byLabelCount = make(map[int]*routeConflictBucket[T])
+	}
+	bucket := i.byLabelCount[entry.labelCount]
+	if bucket == nil {
+		bucket = &routeConflictBucket[T]{}
+		i.byLabelCount[entry.labelCount] = bucket
+	}
+	bucket.add(entry)
+	if entry.hasCatchAll {
+		i.catchAll.add(entry)
+	}
+}
+
+func (b *routeConflictBucket[T]) add(entry *routeEntry[T]) {
+	b.all = append(b.all, entry)
+	if !entry.hasFirstStaticLabel {
+		b.wildcard = append(b.wildcard, entry)
+		return
+	}
+	if b.static == nil {
+		b.static = make(map[string][]*routeEntry[T])
+	}
+	b.static[entry.firstStaticLabel] = append(b.static[entry.firstStaticLabel], entry)
+}
+
+func (i *routeConflictIndex[T]) findConflict(entry *routeEntry[T]) *routeEntry[T] {
+	var best *routeEntry[T]
+	if bucket := i.byLabelCount[entry.labelCount]; bucket != nil {
+		best = earlierConflict(best, bucket.findConflict(entry, 0))
+	}
+
+	if entry.hasCatchAll {
+		for labelCount, bucket := range i.byLabelCount {
+			if labelCount == entry.labelCount {
+				continue
+			}
+			best = earlierConflict(best, bucket.findConflict(entry, 0))
+		}
+		return best
+	}
+
+	return earlierConflict(best, i.catchAll.findConflict(entry, entry.labelCount))
+}
+
+func (b *routeConflictBucket[T]) findConflict(entry *routeEntry[T], skipLabelCount int) *routeEntry[T] {
+	if b == nil {
+		return nil
+	}
+	if entry.hasFirstStaticLabel {
+		static := findConflictInRoutes(b.static[entry.firstStaticLabel], entry, skipLabelCount)
+		wildcard := findConflictInRoutes(b.wildcard, entry, skipLabelCount)
+		return earlierConflict(static, wildcard)
+	}
+	return findConflictInRoutes(b.all, entry, skipLabelCount)
+}
+
+func findConflictInRoutes[T any](routes []*routeEntry[T], entry *routeEntry[T], skipLabelCount int) *routeEntry[T] {
+	for _, existing := range routes {
+		if skipLabelCount != 0 && existing.labelCount == skipLabelCount {
+			continue
+		}
+		if conflictsEntries(existing, entry) {
+			return existing
+		}
+	}
+	return nil
+}
+
+func earlierConflict[T any](a, b *routeEntry[T]) *routeEntry[T] {
+	if a == nil || (b != nil && b.order < a.order) {
+		return b
+	}
+	return a
+}
+
 func (n *node[T]) match(hostname string) (T, Params, bool) {
-	host, ok := validHostname(hostname)
+	host, ok := hostnameWithinBounds(hostname)
 	if !ok {
 		var val T
 		return val, Params{}, false
@@ -273,7 +357,7 @@ func (n *node[T]) match(hostname string) (T, Params, bool) {
 
 func (n *node[T]) matchInto(hostname string, params *Params) (T, bool) {
 	params.Reset()
-	host, ok := validHostname(hostname)
+	host, ok := hostnameWithinBounds(hostname)
 	if !ok {
 		var val T
 		return val, false
@@ -410,10 +494,14 @@ func (n *labelNode[T]) matchHost(host string, end int) (*routeEntry[T], bool) {
 		}
 	}
 
-	remaining := host[:end]
-	for i := range n.catchAll {
-		if _, ok := matchCatchAllPattern(n.catchAll[i].pattern, remaining); ok {
-			return n.catchAll[i].route, true
+	if len(n.catchAll) != 0 {
+		remaining := host[:end]
+		if validHostnameLabels(remaining) {
+			for i := range n.catchAll {
+				if _, ok := matchCatchAllPattern(n.catchAll[i].pattern, remaining); ok {
+					return n.catchAll[i].route, true
+				}
+			}
 		}
 	}
 
@@ -501,7 +589,9 @@ func collectParams[T any](entry *routeEntry[T], host string, start int, params *
 		return
 	}
 
-	params.Grow(entry.captureCount)
+	if entry.captureCount > inlineParamCapacity {
+		params.Grow(entry.captureCount)
+	}
 	if entry.captureCount == 1 {
 		labelIndex := int(entry.singleCaptureLabel)
 		pattern := entry.labels[labelIndex]
@@ -608,12 +698,23 @@ func moreSpecificRoute[T any](a, b *routeEntry[T]) bool {
 }
 
 func (n *labelNode[T]) staticChild(label string) *labelNode[T] {
-	if n.staticIndex != nil && asciiLower(label) {
-		return n.staticIndex[label]
+	if n.staticIndex != nil {
+		if child := n.staticIndex[label]; child != nil {
+			return child
+		}
+		if asciiLower(label) {
+			return nil
+		}
+		if n.staticFoldIndex != nil {
+			key := foldedLabel(label)
+			return n.staticFoldIndex[key]
+		}
+		return nil
 	}
-	if n.staticFoldIndex != nil {
-		key := foldedLabel(label)
-		return n.staticFoldIndex[key]
+	for i := range n.static {
+		if n.static[i].label == label {
+			return n.static[i].child
+		}
 	}
 	for i := range n.static {
 		if asciiEqualFold(n.static[i].label, label) {
@@ -658,11 +759,14 @@ func prevHostLabel(host string, end int) (string, int, bool) {
 	}
 	for i := end - 1; i >= 0; i-- {
 		if host[i] == '.' {
-			if i == end-1 {
+			if i == end-1 || end-i-1 > maxLabelLen {
 				return "", 0, false
 			}
 			return host[i+1 : end], i, true
 		}
+	}
+	if end > maxLabelLen {
+		return "", 0, false
 	}
 	return host[:end], -1, true
 }
@@ -678,16 +782,27 @@ func nextHostLabel(host string, start int) (string, int, bool) {
 }
 
 func validHostname(host string) (string, bool) {
+	host, ok := hostnameWithinBounds(host)
+	if !ok {
+		return "", false
+	}
+	return host, validHostnameLabels(host)
+}
+
+func hostnameWithinBounds(host string) (string, bool) {
 	host = trimRootDot(host)
 	if host == "" || len(host) > maxHostnameLen {
 		return "", false
 	}
+	return host, true
+}
 
+func validHostnameLabels(host string) bool {
 	labelLen := 0
 	for i := 0; i < len(host); i++ {
 		if host[i] == '.' {
 			if labelLen == 0 || labelLen > maxLabelLen {
-				return "", false
+				return false
 			}
 			labelLen = 0
 			continue
@@ -695,9 +810,9 @@ func validHostname(host string) (string, bool) {
 		labelLen++
 	}
 	if labelLen == 0 || labelLen > maxLabelLen {
-		return "", false
+		return false
 	}
-	return host, true
+	return true
 }
 
 func hostnamePrefix(host string, end int) string {
@@ -1078,6 +1193,13 @@ func hasCatchAll(labels []labelPattern) bool {
 		}
 	}
 	return false
+}
+
+func firstDefinitelyStaticLabel(labels []labelPattern) (string, bool) {
+	if len(labels) == 0 || !labels[0].literal {
+		return "", false
+	}
+	return labels[0].raw, true
 }
 
 func sameLabelPattern(a, b labelPattern) bool {
