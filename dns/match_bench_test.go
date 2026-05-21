@@ -35,6 +35,11 @@ func BenchmarkMatch(b *testing.B) {
 			host:     "api.us.wild.example.com",
 		},
 		{
+			name:     "PrefixedCatchAll",
+			patterns: []string{"wild.example.com", "svc-{*subdomain}.wild.example.com"},
+			host:     "svc-api.us.wild.example.com",
+		},
+		{
 			name:     "Mixed",
 			patterns: mixedBenchmarkPatterns(),
 			host:     "api-us.example.com",
@@ -48,6 +53,16 @@ func BenchmarkMatch(b *testing.B) {
 			name:     "Many1000",
 			patterns: generatedBenchmarkPatterns(1000),
 			host:     "route-999.example.com",
+		},
+		{
+			name:     "Many1000Uppercase",
+			patterns: generatedBenchmarkPatterns(1000),
+			host:     "ROUTE-999.EXAMPLE.COM",
+		},
+		{
+			name:     "DynamicMany1000",
+			patterns: generatedDynamicBenchmarkPatterns(1000),
+			host:     "route-999.api.example.com",
 		},
 	}
 
@@ -79,6 +94,11 @@ func BenchmarkMatchMiss(b *testing.B) {
 			name:     "Many1000",
 			patterns: generatedBenchmarkPatterns(1000),
 			host:     "missing.example.com",
+		},
+		{
+			name:     "DynamicMany1000",
+			patterns: generatedDynamicBenchmarkPatterns(1000),
+			host:     "missing.api.example.com",
 		},
 	}
 
@@ -150,6 +170,11 @@ func BenchmarkMatchSuffix(b *testing.B) {
 			name:     "CatchAll",
 			patterns: []string{"wild.example.com", "{*subdomain}.wild.example.com"},
 			host:     "api.us.wild.example.com",
+		},
+		{
+			name:     "MissMany1000",
+			patterns: generatedBenchmarkPatterns(1000),
+			host:     "missing.example.com",
 		},
 	}
 

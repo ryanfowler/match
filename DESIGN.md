@@ -84,30 +84,32 @@ dns.Router[T]
   root node[T]
 
 dns.node[T]
-  routes      []*routeEntry[T]
-  normalized  map[string]string
-  root        labelNode[T]
+  routes         []*routeEntry[T]
+  conflictRoutes []*routeEntry[T]
+  normalized     map[string]string
+  root           labelNode[T]
 
 labelNode[T]
-  static      []staticEdge[T]
-  staticIndex map[string]*labelNode[T]
-  params      []paramEdge[T]
-  catchAll    []catchAllEdge[T]
-  value       *routeEntry[T]
+  static          []staticEdge[T]
+  staticIndex     map[string]*labelNode[T]
+  staticFoldIndex map[foldedLabelKey]*labelNode[T]
+  params          []paramEdge[T]
+  catchAll        []catchAllEdge[T]
+  value           *routeEntry[T]
 ```
 
 The DNS package keeps literal labels lowercased in route entries and trie edges.
 Hot-path matching does not lowercase the input hostname. If the candidate label
-is already lowercase, indexed static lookup can use the label directly. If it
-contains ASCII uppercase bytes, matching falls back to a compact linear
-case-folded comparison over that node's static edges, avoiding a per-match
-allocation.
+is already lowercase, indexed static lookup can use the label directly. Larger
+static fanouts also keep a folded fixed-size label index so uppercase lookups
+remain indexed without allocating a lowercased string.
 
 Insertion uses normalized pattern shapes to reject duplicates independent of
 parameter names and literal case. It also rejects ambiguous dynamic overlaps,
 including catch-all patterns that overlap other capturing patterns. Static
 hostnames may live under broader dynamic or catch-all patterns because literal
-edges deterministically win at match time.
+edges deterministically win at match time, so only capturing routes are kept in
+the ambiguity-check list.
 
 ## High-Level Components
 

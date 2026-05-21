@@ -73,17 +73,19 @@ type routeEntry[T any] struct {
 }
 
 type node[T any] struct {
-	routes     []*routeEntry[T]
-	normalized map[string]string
-	root       labelNode[T]
+	routes         []*routeEntry[T]
+	conflictRoutes []*routeEntry[T]
+	normalized     map[string]string
+	root           labelNode[T]
 }
 
 type labelNode[T any] struct {
-	static      []staticEdge[T]
-	staticIndex map[string]*labelNode[T]
-	params      []paramEdge[T]
-	catchAll    []catchAllEdge[T]
-	value       *routeEntry[T]
+	static          []staticEdge[T]
+	staticIndex     map[string]*labelNode[T]
+	staticFoldIndex map[foldedLabelKey]*labelNode[T]
+	params          []paramEdge[T]
+	catchAll        []catchAllEdge[T]
+	value           *routeEntry[T]
 }
 
 type staticEdge[T any] struct {
@@ -101,6 +103,11 @@ type catchAllEdge[T any] struct {
 	route   *routeEntry[T]
 }
 
+type foldedLabelKey struct {
+	n     uint8
+	bytes [maxLabelLen]byte
+}
+
 type labelPattern struct {
 	raw      string
 	literal  bool
@@ -114,6 +121,7 @@ func (n *node[T]) clone() node[T] {
 	var cloned node[T]
 	entries := make(map[*routeEntry[T]]*routeEntry[T], len(n.routes))
 	cloned.routes = cloneRouteEntries(n.routes, entries)
+	cloned.conflictRoutes = cloneConflictRoutes(n.conflictRoutes, entries)
 	cloned.normalized = maps.Clone(n.normalized)
 
 	nodes := make(map[*labelNode[T]]*labelNode[T])
@@ -139,6 +147,18 @@ func cloneRouteEntries[T any](routes []*routeEntry[T], entries map[*routeEntry[T
 	return clonedRoutes
 }
 
+func cloneConflictRoutes[T any](routes []*routeEntry[T], entries map[*routeEntry[T]]*routeEntry[T]) []*routeEntry[T] {
+	if len(routes) == 0 {
+		return nil
+	}
+
+	clonedRoutes := make([]*routeEntry[T], len(routes))
+	for i, entry := range routes {
+		clonedRoutes[i] = entries[entry]
+	}
+	return clonedRoutes
+}
+
 func cloneLabelNodeInto[T any](src, dst *labelNode[T], entries map[*routeEntry[T]]*routeEntry[T], nodes map[*labelNode[T]]*labelNode[T]) {
 	nodes[src] = dst
 	if src.value != nil {
@@ -157,6 +177,12 @@ func cloneLabelNodeInto[T any](src, dst *labelNode[T], entries map[*routeEntry[T
 		dst.staticIndex = maps.Clone(src.staticIndex)
 		for label, child := range dst.staticIndex {
 			dst.staticIndex[label] = nodes[child]
+		}
+	}
+	if src.staticFoldIndex != nil {
+		dst.staticFoldIndex = maps.Clone(src.staticFoldIndex)
+		for label, child := range dst.staticFoldIndex {
+			dst.staticFoldIndex[label] = nodes[child]
 		}
 	}
 
@@ -190,14 +216,19 @@ func (n *node[T]) insert(pattern string, value T) error {
 		return &ConflictError{Pattern: entry.pattern, With: existing}
 	}
 
-	for _, existing := range n.routes {
-		if conflictsEntries(existing, entry) {
-			return &ConflictError{Pattern: entry.pattern, With: existing.pattern}
+	if entry.captureCount != 0 {
+		for _, existing := range n.conflictRoutes {
+			if conflictsEntries(existing, entry) {
+				return &ConflictError{Pattern: entry.pattern, With: existing.pattern}
+			}
 		}
 	}
 
 	n.normalized[normalized] = entry.pattern
 	n.routes = append(n.routes, entry)
+	if entry.captureCount != 0 {
+		n.conflictRoutes = append(n.conflictRoutes, entry)
+	}
 	n.insertTree(entry)
 	return nil
 }
@@ -574,6 +605,10 @@ func (n *labelNode[T]) staticChild(label string) *labelNode[T] {
 	if n.staticIndex != nil && asciiLower(label) {
 		return n.staticIndex[label]
 	}
+	if n.staticFoldIndex != nil {
+		key := foldedLabel(label)
+		return n.staticFoldIndex[key]
+	}
 	for i := range n.static {
 		if asciiEqualFold(n.static[i].label, label) {
 			return n.static[i].child
@@ -586,14 +621,26 @@ func (n *labelNode[T]) addStaticChild(label string, child *labelNode[T]) {
 	n.static = append(n.static, staticEdge[T]{label: label, child: child})
 	if len(n.static) == 9 {
 		n.staticIndex = make(map[string]*labelNode[T], len(n.static))
+		n.staticFoldIndex = make(map[foldedLabelKey]*labelNode[T], len(n.static))
 		for i := range n.static {
 			n.staticIndex[n.static[i].label] = n.static[i].child
+			n.staticFoldIndex[foldedLabel(n.static[i].label)] = n.static[i].child
 		}
 		return
 	}
 	if n.staticIndex != nil {
 		n.staticIndex[label] = child
+		n.staticFoldIndex[foldedLabel(label)] = child
 	}
+}
+
+func foldedLabel(label string) foldedLabelKey {
+	var key foldedLabelKey
+	key.n = uint8(len(label))
+	for i := 0; i < len(label); i++ {
+		key.bytes[i] = lowerASCIIByte(label[i])
+	}
+	return key
 }
 
 func prevHostLabel(host string, end int) (string, int, bool) {
@@ -733,6 +780,10 @@ func parsePattern(pattern string) ([]labelPattern, []string, int, int, string, e
 			}
 			captureCount++
 		}
+	}
+
+	if minHostnameLength(labels) > maxHostnameLen {
+		return nil, nil, 0, 0, "", ErrInvalidHostname
 	}
 
 	return labels, captureNames, singleCaptureLabel, captureCount, unescapeBraces(canonicalPattern), nil
@@ -951,6 +1002,23 @@ func validateLabelPattern(pattern labelPattern) error {
 	return nil
 }
 
+func minHostnameLength(labels []labelPattern) int {
+	if len(labels) == 0 {
+		return 0
+	}
+
+	length := len(labels) - 1
+	for i := range labels {
+		p := labels[i]
+		if p.literal {
+			length += len(p.raw)
+			continue
+		}
+		length += len(p.prefix) + len(p.suffix) + 1
+	}
+	return length
+}
+
 func normalizedLabels(labels []labelPattern) string {
 	var b strings.Builder
 	for i := range labels {
@@ -1056,7 +1124,7 @@ func matchCatchAllPattern(pattern labelPattern, remaining string) (string, bool)
 		return "", false
 	}
 	value := remaining[len(pattern.prefix):]
-	if value == "" {
+	if value == "" || value[0] == '.' {
 		return "", false
 	}
 	return value, true
@@ -1138,11 +1206,7 @@ func catchAllOverlapsLeading(catchAll labelPattern, leading []labelPattern) bool
 	if len(leading) == 0 {
 		return false
 	}
-	first := leading[0]
-	if labelCanStartLongerThan(first, catchAll.prefix) {
-		return true
-	}
-	return len(leading) > 1 && labelCanEqual(first, catchAll.prefix)
+	return labelCanStartLongerThan(leading[0], catchAll.prefix)
 }
 
 func labelConflict(a, b labelPattern) bool {
@@ -1207,16 +1271,6 @@ func labelCanStartWith(pattern labelPattern, prefix string) bool {
 		return strings.HasPrefix(pattern.raw, prefix)
 	}
 	return compatiblePrefixes(pattern.prefix, prefix)
-}
-
-func labelCanEqual(pattern labelPattern, value string) bool {
-	if pattern.literal {
-		return pattern.raw == value
-	}
-	if pattern.catchAll {
-		return strings.HasPrefix(value, pattern.prefix) && len(value) > len(pattern.prefix)
-	}
-	return literalMatchesLabel(value, pattern)
 }
 
 func lowerASCII(s string) string {
