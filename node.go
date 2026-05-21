@@ -57,6 +57,7 @@ type routeEntry[T any] struct {
 	segmentCount          int
 	order                 int
 	firstStaticSegment    string
+	singleCaptureSegment  uint32
 	hasFirstStaticSegment bool
 	hasCatchAll           bool
 	value                 T
@@ -155,12 +156,13 @@ func (n *node[T]) insertDynamic(route string, value T) error {
 	}
 
 	segments := splitTokenSegments(tokens)
-	patterns, captureNames, captureCount := makeSegmentPatterns(segments)
+	patterns, captureNames, singleCaptureSegment, captureCount := makeSegmentPatterns(segments)
 	firstStaticSegment, hasFirstStaticSegment := firstDefinitelyStaticSegment(patterns)
 	entry := &routeEntry[T]{
 		route:                 unescapeBraces(route),
 		patterns:              patterns,
 		captureNames:          captureNames,
+		singleCaptureSegment:  uint32(singleCaptureSegment),
 		captureCount:          captureCount,
 		segmentCount:          len(patterns),
 		order:                 len(n.routes),
@@ -299,8 +301,8 @@ func (n *node[T]) match(route string) (T, Params, bool) {
 }
 
 func (n *node[T]) matchInto(route string, params Params) (T, Params, bool) {
-	root, index, _ := n.matchRoot(route)
 	params = params.reset()
+	root, index, _ := n.matchRoot(route)
 	entry, ok := root.matchPath(route, index)
 	if !ok {
 		var val T
@@ -525,6 +527,41 @@ func collectParams[T any](entry *routeEntry[T], path string, params Params) Para
 
 	if entry.captureCount > inlineParams {
 		params = params.ensureCapacity(entry.captureCount)
+	}
+
+	if entry.captureCount == 1 {
+		index := 0
+		captureSegment := int(entry.singleCaptureSegment)
+		for segmentIndex := 0; segmentIndex < captureSegment; segmentIndex++ {
+			_, index = nextPathSegment(path, index)
+			if index < 0 {
+				return params
+			}
+		}
+
+		pattern := entry.patterns[captureSegment]
+		name := entry.captureNames[captureSegment]
+		if pattern.catchAll {
+			rest := path[index:]
+			if pattern.prefix == "" {
+				if rest != "" {
+					return params.append(name, rest)
+				}
+			} else if value, ok := matchCatchAllPattern(pattern, rest); ok {
+				return params.append(name, value)
+			}
+			return params
+		}
+
+		pathSegment, _ := nextPathSegment(path, index)
+		if pattern.prefix == "" && pattern.suffix == "" {
+			if pathSegment != "" {
+				return params.append(name, pathSegment)
+			}
+		} else if value, ok := matchAffixedParamPattern(pattern, pathSegment); ok {
+			return params.append(name, value)
+		}
+		return params
 	}
 
 	index := 0
@@ -783,9 +820,10 @@ func countTokenSegments(tokens []token) int {
 	return count
 }
 
-func makeSegmentPatterns(segments [][]token) ([]segmentPattern, []string, int) {
+func makeSegmentPatterns(segments [][]token) ([]segmentPattern, []string, int, int) {
 	patterns := make([]segmentPattern, len(segments))
 	var captureNames []string
+	singleCaptureSegment := -1
 	captureCount := 0
 	for i := range segments {
 		var capture string
@@ -795,10 +833,13 @@ func makeSegmentPatterns(segments [][]token) ([]segmentPattern, []string, int) {
 				captureNames = make([]string, len(segments))
 			}
 			captureNames[i] = capture
+			if captureCount == 0 {
+				singleCaptureSegment = i
+			}
 			captureCount++
 		}
 	}
-	return patterns, captureNames, captureCount
+	return patterns, captureNames, singleCaptureSegment, captureCount
 }
 
 func firstDefinitelyStaticSegment(patterns []segmentPattern) (string, bool) {
