@@ -299,6 +299,9 @@ as `/user_{name}` and `/user_{id}`.
 
 ## Internals
 
+For a deeper implementation-level architecture overview, see
+[DESIGN.md](DESIGN.md).
+
 Routes are parsed once during insertion. The parser turns a route string into
 tokens, splits those tokens into segment patterns, records capture names in
 route order, and builds a normalized route shape used to detect duplicates even
