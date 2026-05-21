@@ -33,6 +33,10 @@
 // cleaned. If you are matching net/http requests, apply whatever URL or path
 // normalization your application wants before calling Match.
 //
+// The github.com/ryanfowler/match/dns sub-package provides a DNS hostname
+// matcher with the same generic value and Params model for dot-separated,
+// case-insensitive hostname labels.
+//
 // # Route Grammar
 //
 // Routes are slash-separated patterns made from literal text, named parameters,

@@ -40,6 +40,74 @@ because `Params.Seq` exposes an `iter.Seq2`.
 | `params.go` | Public `Param` and `Params` types plus allocation-conscious parameter storage helpers. |
 | `match_test.go` | Behavioral tests for route grammar, matching, prefix matching, conflicts, and `Params`. |
 | `match_bench_test.go` | Benchmarks for insertion, exact matching, prefix matching, misses, and reusable parameter buffers. |
+| `dns/` | DNS hostname matcher sub-package with its own parser, reversed label trie, tests, and benchmarks. |
+
+## DNS Sub-Package
+
+`github.com/ryanfowler/match/dns` applies the same router model to DNS
+hostnames. It deliberately has its own implementation instead of translating
+hostnames into slash paths, because DNS matching has different boundaries and
+specificity rules:
+
+- Hostname patterns are dot-separated labels, not slash-separated segments.
+- Matching is ASCII case-insensitive for literal text.
+- A single trailing root dot is ignored for both insertion and matching.
+- Labels are walked right-to-left, so shared suffixes such as `example.com`
+  form the natural trie path.
+- Catch-all parameters live on the left side: `{*sub}.example.com` captures
+  leading labels such as `a.b`.
+
+The public API mirrors the root package where possible:
+
+```go
+type Router[T any] struct {
+	root node[T]
+}
+
+type SuffixMatch[T any] struct {
+	Value  T
+	Params Params
+	Prefix string
+}
+```
+
+`Match` resolves an exact hostname. `MatchSuffix` resolves the best whole-label
+suffix and returns the unmatched leading labels in `Prefix`, which is the DNS
+analogue of path prefix matching. `dns.Params` and `dns.Param` are aliases of
+the root package types, so callers can reuse the same allocation-conscious
+storage model across both packages.
+
+Internally, DNS routes are stored in a reversed label trie:
+
+```text
+dns.Router[T]
+  root node[T]
+
+dns.node[T]
+  routes      []*routeEntry[T]
+  normalized  map[string]string
+  root        labelNode[T]
+
+labelNode[T]
+  static      []staticEdge[T]
+  staticIndex map[string]*labelNode[T]
+  params      []paramEdge[T]
+  catchAll    []catchAllEdge[T]
+  value       *routeEntry[T]
+```
+
+The DNS package keeps literal labels lowercased in route entries and trie edges.
+Hot-path matching does not lowercase the input hostname. If the candidate label
+is already lowercase, indexed static lookup can use the label directly. If it
+contains ASCII uppercase bytes, matching falls back to a compact linear
+case-folded comparison over that node's static edges, avoiding a per-match
+allocation.
+
+Insertion uses normalized pattern shapes to reject duplicates independent of
+parameter names and literal case. It also rejects ambiguous dynamic overlaps,
+including catch-all patterns that overlap other capturing patterns. Static
+hostnames may live under broader dynamic or catch-all patterns because literal
+edges deterministically win at match time.
 
 ## High-Level Components
 
@@ -553,8 +621,10 @@ This design has three advantages:
 - Multiple captures: scan the path and route patterns together.
 
 For routes with more than four captures, `collectParams` calls
-`Params.ensureCapacity` before appending. This lets `Match` allocate once for a
-large capture set and lets `MatchInto` reuse caller-provided heap capacity.
+`Params.ensureCapacity` before appending. The DNS sub-package uses the exported
+`Params.Grow` equivalent for the same behavior. This lets `Match` allocate once
+for a large capture set and lets `MatchInto` reuse caller-provided heap
+capacity.
 
 Capture extraction uses the same helpers as matching:
 
@@ -584,6 +654,8 @@ The main operations are:
 
 - `NewParams(capacity)` creates an empty reusable buffer.
 - `ParamsOf` constructs a `Params` from explicit values.
+- `Reset`, `Grow`, and `Append` expose the reusable builder operations needed
+  by sub-packages while preserving the opaque representation.
 - `Merge` concatenates two parameter sets without deduplicating keys.
 - `Len` and `At` provide indexed access.
 - `Get` and `TryGet` perform linear name lookup.
@@ -594,9 +666,10 @@ The main operations are:
 `Get` and `TryGet` are intentionally linear. Parameter counts are expected to be
 small, and avoiding a map keeps the hot path compact.
 
-`Params.reset` clears the logical length while preserving heap capacity. This is
-why `MatchInto` and `MatchPrefixInto` can avoid allocation after the caller has
-provided a sufficiently large buffer.
+`Params.reset` and its public wrapper `Reset` clear the logical length while
+preserving heap capacity. This is why `MatchInto`, `MatchPrefixInto`, and the
+DNS package's `Into` methods can avoid allocation after the caller has provided
+a sufficiently large buffer.
 
 ## Error Model
 

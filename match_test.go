@@ -1200,6 +1200,28 @@ func TestParamsAccessors(t *testing.T) {
 	}
 }
 
+func TestParamsExportedBuilders(t *testing.T) {
+	params := NewParams(5)
+	params = params.Append("a", "1")
+	params = params.Append("b", "2")
+	params = params.Reset()
+	if params.Len() != 0 {
+		t.Fatalf("Reset length = %d, want 0", params.Len())
+	}
+	if params.heap == nil || cap(params.heap) < 5 {
+		t.Fatalf("Reset heap capacity = %d, want at least 5", cap(params.heap))
+	}
+
+	params = params.Grow(6)
+	params = params.Append("c", "3")
+	if params.Len() != 1 || params.At(0) != (Param{"c", "3"}) {
+		t.Fatalf("Append after Grow = %#v, want c=3", params.All())
+	}
+	if cap(params.heap) < 6 {
+		t.Fatalf("Grow heap capacity = %d, want at least 6", cap(params.heap))
+	}
+}
+
 func TestParamsAtPanicsOutOfRange(t *testing.T) {
 	params := ParamsOf(Param{"team", "core"})
 	for _, index := range []int{-1, 1} {

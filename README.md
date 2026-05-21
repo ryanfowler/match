@@ -75,6 +75,63 @@ var router match.Router[Handler]
 router.Insert("/health", Handler{Name: "healthcheck"})
 ```
 
+## DNS Hostname Matching
+
+The module also includes `github.com/ryanfowler/match/dns`, a sub-package for
+DNS-style hostname matching with the same generic value storage and reusable
+parameter capture model:
+
+```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/ryanfowler/match/dns"
+)
+
+func main() {
+	var router dns.Router[string]
+
+	router.Insert("example.com", "apex")
+	router.Insert("{tenant}.example.com", "tenant")
+
+	value, params, ok := router.Match("api.example.com.")
+	if !ok {
+		return
+	}
+
+	fmt.Println(value)                // "tenant"
+	fmt.Println(params.Get("tenant")) // "api"
+}
+```
+
+DNS patterns are dot-separated labels matched right-to-left. Literal labels are
+ASCII case-insensitive, and a single trailing root dot is ignored, so
+`Example.COM` and `example.com.` are equivalent. The package does not parse
+`host:port` strings, perform IDNA conversion, or normalize Unicode.
+
+The DNS grammar mirrors the path router where it fits DNS labels:
+
+| Syntax | Meaning |
+| --- | --- |
+| `example.com` | Matches the literal hostname. |
+| `{tenant}.example.com` | Captures one non-empty label as `tenant`. |
+| `api-{region}.example.com` | Captures part of one label. |
+| `{*subdomain}.example.com` | Captures one or more leading labels, such as `a.b`. |
+| `{{literal}}.example.com` | Matches literal braces. |
+
+Use `MatchSuffix` for zone-style dispatch:
+
+```go
+router.Insert("example.com", "zone")
+
+got, ok := router.MatchSuffix("api.us.example.com")
+// got.Value == "zone"
+// got.Prefix == "api.us"
+// ok == true
+```
+
 ## API Overview
 
 Use `Insert` when route definitions are trusted and should fail fast:
