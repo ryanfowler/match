@@ -54,11 +54,11 @@ func (r *Router[T]) Match(path string) (T, Params, bool) {
 	return r.root.match(path)
 }
 
-// MatchInto returns the value and parameters for path using params as storage.
+// MatchInto returns the value for path using params as parameter storage.
 //
-// The input Params value is reset before matching. Use NewParams to create a
-// reusable Params buffer large enough for the expected number of captures.
-func (r *Router[T]) MatchInto(path string, params Params) (T, Params, bool) {
+// Params is reset before matching and must be non-nil. Use NewParams to create
+// a reusable Params buffer large enough for the expected number of captures.
+func (r *Router[T]) MatchInto(path string, params *Params) (T, bool) {
 	return r.root.matchInto(path, params)
 }
 
@@ -75,8 +75,8 @@ func (r *Router[T]) MatchPrefix(path string) (PrefixMatch[T], bool) {
 
 // MatchPrefixInto is like MatchPrefix, but uses params as parameter storage.
 //
-// The input Params value is reset before matching. Use NewParams to create a
-// reusable Params buffer large enough for the expected number of captures.
-func (r *Router[T]) MatchPrefixInto(path string, params Params) (PrefixMatch[T], bool) {
+// Params is reset before matching and must be non-nil. Use NewParams to create
+// a reusable Params buffer large enough for the expected number of captures.
+func (r *Router[T]) MatchPrefixInto(path string, params *Params) (PrefixMatch[T], bool) {
 	return r.root.matchPrefixInto(path, params)
 }

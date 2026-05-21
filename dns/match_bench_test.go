@@ -6,11 +6,12 @@ import (
 )
 
 var (
-	benchString string
-	benchParams Params
-	benchSuffix SuffixMatch[string]
-	benchRouter Router[string]
-	benchOK     bool
+	benchString   string
+	benchParams   Params
+	benchParamLen int
+	benchSuffix   SuffixMatch[string]
+	benchRouter   Router[string]
+	benchOK       bool
 )
 
 func BenchmarkMatch(b *testing.B) {
@@ -144,7 +145,8 @@ func BenchmarkMatchInto(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				benchString, benchParams, benchOK = router.MatchInto(bm.host, params)
+				benchString, benchOK = router.MatchInto(bm.host, &params)
+				benchParamLen = params.Len()
 			}
 		})
 	}
@@ -220,7 +222,7 @@ func BenchmarkMatchSuffixInto(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				benchSuffix, benchOK = router.MatchSuffixInto(bm.host, params)
+				benchSuffix, benchOK = router.MatchSuffixInto(bm.host, &params)
 			}
 		})
 	}

@@ -178,11 +178,11 @@ it needs during insertion. The methods delegate directly to the internal root:
 - `TryInsert(route, value)` registers a route or returns validation/conflict
   errors.
 - `Match(path)` returns an exact match.
-- `MatchInto(path, params)` returns an exact match while reusing caller-provided
-  parameter storage.
+- `MatchInto(path, &params)` returns an exact match while reusing
+  caller-provided parameter storage.
 - `MatchPrefix(path)` returns the best whole-segment route prefix plus the
   remaining path.
-- `MatchPrefixInto(path, params)` combines prefix matching with reusable
+- `MatchPrefixInto(path, &params)` combines prefix matching with reusable
   parameter storage.
 - `Clone()` returns an independent copy of the router's internal route table,
   trie, and conflict index.
@@ -649,14 +649,14 @@ type Params struct {
 value, avoiding heap allocation for common route shapes.
 
 When more than four captures are needed, `Params` switches to `heap` storage.
-The heap slice is kept inside the value so callers can pass it back to
+The heap slice is kept inside the value so callers can pass a pointer to it into
 `MatchInto` or `MatchPrefixInto` for reuse.
 
 The main operations are:
 
 - `NewParams(capacity)` creates an empty reusable buffer.
 - `ParamsOf` constructs a `Params` from explicit values.
-- `Reset`, `Grow`, and `Append` expose the reusable builder operations needed
+- `Reset`, `Grow`, and `Append` expose mutating reusable builder operations needed
   by sub-packages while preserving the opaque representation.
 - `Merge` concatenates two parameter sets without deduplicating keys.
 - `Len` and `At` provide indexed access.
@@ -800,8 +800,8 @@ When changing `Params`, preserve these public expectations:
 - `Params` remains an opaque value type.
 - `Len`, `At`, `Get`, `TryGet`, `AppendTo`, `All`, and `Seq` keep their current
   semantics.
-- `MatchInto` and `MatchPrefixInto` reset logical length and preserve reusable
-  heap capacity.
+- `MatchInto` and `MatchPrefixInto` reset a caller-provided `*Params` and
+  preserve reusable heap capacity.
 - Small capture sets avoid allocation.
 
 When changing insertion, preserve these invariants:

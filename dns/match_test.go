@@ -441,15 +441,15 @@ func TestMatchIntoReusesParams(t *testing.T) {
 
 	buf := NewParams(5)
 	allocs := testing.AllocsPerRun(100, func() {
-		got, params, ok := router.MatchInto("a.b.c.d.e.example.com", buf)
+		got, ok := router.MatchInto("a.b.c.d.e.example.com", &buf)
 		if !ok {
 			t.Fatal("MatchInto did not match")
 		}
 		if got != "many" {
 			t.Fatalf("value = %q, want many", got)
 		}
-		if params.Len() != 5 {
-			t.Fatalf("params length = %d, want 5", params.Len())
+		if buf.Len() != 5 {
+			t.Fatalf("params length = %d, want 5", buf.Len())
 		}
 	})
 	if allocs != 0 {
@@ -462,21 +462,21 @@ func TestMatchIntoMissPreservesHeapParams(t *testing.T) {
 	router.Insert("{a}.{b}.{c}.{d}.{e}.example.com", "many")
 
 	buf := NewParams(5)
-	_, params, ok := router.MatchInto("missing.example.com", buf)
+	_, ok := router.MatchInto("missing.example.com", &buf)
 	if ok {
 		t.Fatal("MatchInto matched unexpected hostname")
 	}
-	if params.Len() != 0 {
-		t.Fatalf("miss params length = %d, want 0", params.Len())
+	if buf.Len() != 0 {
+		t.Fatalf("miss params length = %d, want 0", buf.Len())
 	}
 
 	allocs := testing.AllocsPerRun(100, func() {
-		_, matchedParams, ok := router.MatchInto("a.b.c.d.e.example.com", params)
+		_, ok := router.MatchInto("a.b.c.d.e.example.com", &buf)
 		if !ok {
 			t.Fatal("MatchInto did not match")
 		}
-		if matchedParams.Len() != 5 {
-			t.Fatalf("params length = %d, want 5", matchedParams.Len())
+		if buf.Len() != 5 {
+			t.Fatalf("params length = %d, want 5", buf.Len())
 		}
 	})
 	if allocs != 0 {
@@ -490,7 +490,7 @@ func TestMatchSuffixIntoReusesParams(t *testing.T) {
 
 	buf := NewParams(1)
 	allocs := testing.AllocsPerRun(100, func() {
-		got, ok := router.MatchSuffixInto("api.tenant.example.com", buf)
+		got, ok := router.MatchSuffixInto("api.tenant.example.com", &buf)
 		if !ok {
 			t.Fatal("MatchSuffixInto did not match")
 		}
@@ -499,6 +499,9 @@ func TestMatchSuffixIntoReusesParams(t *testing.T) {
 		}
 		if !paramsEqual(got.Params, ParamsOf(Param{"tenant", "tenant"})) {
 			t.Fatalf("params = %#v, want tenant=tenant", got.Params.All())
+		}
+		if !paramsEqual(buf, ParamsOf(Param{"tenant", "tenant"})) {
+			t.Fatalf("buffer params = %#v, want tenant=tenant", buf.All())
 		}
 	})
 	if allocs != 0 {
