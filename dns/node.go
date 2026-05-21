@@ -266,23 +266,26 @@ func (n *node[T]) match(hostname string) (T, Params, bool) {
 		var val T
 		return val, Params{}, false
 	}
-	return entry.value, collectParams(entry, host, 0, Params{}), true
+	var params Params
+	collectParams(entry, host, 0, &params)
+	return entry.value, params, true
 }
 
-func (n *node[T]) matchInto(hostname string, params Params) (T, Params, bool) {
-	params = params.Reset()
+func (n *node[T]) matchInto(hostname string, params *Params) (T, bool) {
+	params.Reset()
 	host, ok := validHostname(hostname)
 	if !ok {
 		var val T
-		return val, params, false
+		return val, false
 	}
 
 	entry, ok := n.root.matchHost(host, len(host))
 	if !ok {
 		var val T
-		return val, params, false
+		return val, false
 	}
-	return entry.value, collectParams(entry, host, 0, params), true
+	collectParams(entry, host, 0, params)
+	return entry.value, true
 }
 
 func (n *node[T]) matchSuffix(hostname string) (SuffixMatch[T], bool) {
@@ -295,21 +298,24 @@ func (n *node[T]) matchSuffix(hostname string) (SuffixMatch[T], bool) {
 	if !ok {
 		return SuffixMatch[T]{}, false
 	}
-	return match.suffix(host, collectParams(match.entry, host, suffixStart(match.prefixEnd), Params{})), true
+	var params Params
+	collectParams(match.entry, host, suffixStart(match.prefixEnd), &params)
+	return match.suffix(host, params), true
 }
 
-func (n *node[T]) matchSuffixInto(hostname string, params Params) (SuffixMatch[T], bool) {
-	params = params.Reset()
+func (n *node[T]) matchSuffixInto(hostname string, params *Params) (SuffixMatch[T], bool) {
+	params.Reset()
 	host, ok := validHostname(hostname)
 	if !ok {
-		return SuffixMatch[T]{Params: params}, false
+		return SuffixMatch[T]{Params: *params}, false
 	}
 
 	match, ok := n.root.matchSuffixHost(host, len(host), 0)
 	if !ok {
-		return SuffixMatch[T]{Params: params}, false
+		return SuffixMatch[T]{Params: *params}, false
 	}
-	return match.suffix(host, collectParams(match.entry, host, suffixStart(match.prefixEnd), params)), true
+	collectParams(match.entry, host, suffixStart(match.prefixEnd), params)
+	return match.suffix(host, *params), true
 }
 
 func (n *node[T]) insertTree(entry *routeEntry[T]) {
@@ -490,12 +496,12 @@ func betterSuffixMatch[T any](best, candidate suffixRouteMatch[T]) suffixRouteMa
 	return best
 }
 
-func collectParams[T any](entry *routeEntry[T], host string, start int, params Params) Params {
+func collectParams[T any](entry *routeEntry[T], host string, start int, params *Params) {
 	if entry.captureCount == 0 {
-		return params
+		return
 	}
 
-	params = params.Grow(entry.captureCount)
+	params.Grow(entry.captureCount)
 	if entry.captureCount == 1 {
 		labelIndex := int(entry.singleCaptureLabel)
 		pattern := entry.labels[labelIndex]
@@ -503,27 +509,29 @@ func collectParams[T any](entry *routeEntry[T], host string, start int, params P
 		if pattern.catchAll {
 			catchEnd := indexBeforeRightLabels(host, len(entry.labels)-1)
 			if value, ok := matchCatchAllPattern(pattern, host[start:catchEnd]); ok {
-				return params.Append(name, value)
+				params.Append(name, value)
+				return
 			}
-			return params
+			return
 		}
 
 		labelStart := start
 		for i := 0; i < labelIndex; i++ {
 			_, next, ok := nextHostLabel(host, labelStart)
 			if !ok || next < 0 {
-				return params
+				return
 			}
 			labelStart = next
 		}
 		label, _, ok := nextHostLabel(host, labelStart)
 		if !ok {
-			return params
+			return
 		}
 		if value, ok := matchParamCapture(pattern, label); ok {
-			return params.Append(name, value)
+			params.Append(name, value)
+			return
 		}
-		return params
+		return
 	}
 
 	if entry.labels[0].catchAll {
@@ -531,42 +539,40 @@ func collectParams[T any](entry *routeEntry[T], host string, start int, params P
 		pattern := entry.labels[0]
 		value, ok := matchCatchAllPattern(pattern, host[start:catchEnd])
 		if ok {
-			params = params.Append(entry.captureNames[0], value)
+			params.Append(entry.captureNames[0], value)
 		}
 
 		if len(entry.labels) == 1 {
-			return params
+			return
 		}
 		start = catchEnd + 1
 		for i := 1; i < len(entry.labels); i++ {
 			label, next, ok := nextHostLabel(host, start)
 			if !ok {
-				return params
+				return
 			}
 			if entry.labels[i].param {
 				if value, ok := matchParamCapture(entry.labels[i], label); ok {
-					params = params.Append(entry.captureNames[i], value)
+					params.Append(entry.captureNames[i], value)
 				}
 			}
 			start = next
 		}
-		return params
+		return
 	}
 
 	for i := range entry.labels {
 		label, next, ok := nextHostLabel(host, start)
 		if !ok {
-			return params
+			return
 		}
 		if entry.labels[i].param {
 			if value, ok := matchParamCapture(entry.labels[i], label); ok {
-				params = params.Append(entry.captureNames[i], value)
+				params.Append(entry.captureNames[i], value)
 			}
 		}
 		start = next
 	}
-
-	return params
 }
 
 func matchParamCapture(pattern labelPattern, label string) (string, bool) {

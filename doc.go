@@ -66,7 +66,7 @@
 // or other input that should produce a regular error.
 //
 // Match looks up an exact path. MatchInto is the same operation using a
-// caller-provided Params value as reusable storage. MatchPrefix and
+// caller-provided *Params value as reusable storage. MatchPrefix and
 // MatchPrefixInto return the best whole-segment route prefix plus the remaining
 // path, which is useful for mounts and nested dispatch. Rest is / when a prefix
 // match consumes the full path. Clone returns an independent copy of a Router's
@@ -118,7 +118,7 @@
 // Parameters are collected after the winning route is selected, using the
 // canonical route entry's capture names. Params stores up to four captures
 // inline and grows to a slice only when needed. MatchInto and MatchPrefixInto
-// reset and reuse a caller-provided Params value, which avoids heap allocation
+// reset and reuse a caller-provided *Params value, which avoids heap allocation
 // for common hot-path routing loops.
 //
 // Callers that insert routes while other goroutines use the router must

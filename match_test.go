@@ -804,18 +804,15 @@ func TestMatchIntoReusesParams(t *testing.T) {
 	router.Insert("/teams/{team}/members/{member}", "member")
 
 	buf := NewParams(2)
-	got, params, ok := router.MatchInto("/teams/core/members/ana", buf)
+	got, ok := router.MatchInto("/teams/core/members/ana", &buf)
 	if !ok {
 		t.Fatal("MatchInto did not match")
 	}
 	if got != "member" {
 		t.Fatalf("value = %q, want member", got)
 	}
-	if !paramsEqual(params, ParamsOf(Param{"team", "core"}, Param{"member", "ana"})) {
-		t.Fatalf("params = %#v", params)
-	}
-	if buf.Len() != 0 {
-		t.Fatalf("input buffer length = %d, want 0", buf.Len())
+	if !paramsEqual(buf, ParamsOf(Param{"team", "core"}, Param{"member", "ana"})) {
+		t.Fatalf("params = %#v", buf)
 	}
 }
 
@@ -824,12 +821,12 @@ func TestMatchIntoMissResetsInlineParams(t *testing.T) {
 	router.Insert("/{team}/{member}", "member")
 
 	buf := ParamsOf(Param{"stale", "value"})
-	_, params, ok := router.MatchInto("/missing", buf)
+	_, ok := router.MatchInto("/missing", &buf)
 	if ok {
 		t.Fatal("MatchInto matched unexpected path")
 	}
-	if params.Len() != 0 {
-		t.Fatalf("miss params length = %d, want 0", params.Len())
+	if buf.Len() != 0 {
+		t.Fatalf("miss params length = %d, want 0", buf.Len())
 	}
 }
 
@@ -839,12 +836,12 @@ func TestMatchIntoReusesHeapParams(t *testing.T) {
 
 	buf := NewParams(5)
 	allocs := testing.AllocsPerRun(100, func() {
-		_, params, ok := router.MatchInto("/a/b/c/d/e", buf)
+		_, ok := router.MatchInto("/a/b/c/d/e", &buf)
 		if !ok {
 			t.Fatal("MatchInto did not match")
 		}
-		if params.Len() != 5 {
-			t.Fatalf("params length = %d, want 5", params.Len())
+		if buf.Len() != 5 {
+			t.Fatalf("params length = %d, want 5", buf.Len())
 		}
 	})
 	if allocs != 0 {
@@ -857,24 +854,24 @@ func TestMatchIntoMissPreservesHeapParams(t *testing.T) {
 	router.Insert("/{a}/{b}/{c}/{d}/{e}", "many")
 
 	buf := NewParams(5)
-	_, params, ok := router.MatchInto("/miss", buf)
+	_, ok := router.MatchInto("/miss", &buf)
 	if ok {
 		t.Fatal("MatchInto matched unexpected path")
 	}
-	if params.Len() != 0 {
-		t.Fatalf("miss params length = %d, want 0", params.Len())
+	if buf.Len() != 0 {
+		t.Fatalf("miss params length = %d, want 0", buf.Len())
 	}
-	if params.heap == nil || cap(params.heap) < 5 {
-		t.Fatalf("miss params heap capacity = %d, want at least 5", cap(params.heap))
+	if buf.heap == nil || cap(buf.heap) < 5 {
+		t.Fatalf("miss params heap capacity = %d, want at least 5", cap(buf.heap))
 	}
 
 	allocs := testing.AllocsPerRun(100, func() {
-		_, matchedParams, ok := router.MatchInto("/a/b/c/d/e", params)
+		_, ok := router.MatchInto("/a/b/c/d/e", &buf)
 		if !ok {
 			t.Fatal("MatchInto did not match")
 		}
-		if matchedParams.Len() != 5 {
-			t.Fatalf("params length = %d, want 5", matchedParams.Len())
+		if buf.Len() != 5 {
+			t.Fatalf("params length = %d, want 5", buf.Len())
 		}
 	})
 	if allocs != 0 {
@@ -888,7 +885,8 @@ func TestMatchIntoHeapParamsSurviveBacktracking(t *testing.T) {
 		router.Insert("/{id}", "id")
 		router.Insert("/{name}/bar", "bar")
 
-		got, params, ok := router.MatchInto("/abc", NewParams(5))
+		params := NewParams(5)
+		got, ok := router.MatchInto("/abc", &params)
 		if !ok {
 			t.Fatal("MatchInto did not match")
 		}
@@ -905,7 +903,8 @@ func TestMatchIntoHeapParamsSurviveBacktracking(t *testing.T) {
 		router.Insert("/user-{id}/view", "specific")
 		router.Insert("/{id}/view", "generic")
 
-		got, params, ok := router.MatchInto("/user-42/view", NewParams(5))
+		params := NewParams(5)
+		got, ok := router.MatchInto("/user-42/view", &params)
 		if !ok {
 			t.Fatal("MatchInto did not match")
 		}
@@ -1111,7 +1110,7 @@ func TestMatchPrefixIntoReusesParams(t *testing.T) {
 
 	buf := NewParams(5)
 	allocs := testing.AllocsPerRun(100, func() {
-		got, ok := router.MatchPrefixInto("/a/b/c/d/e/rest", buf)
+		got, ok := router.MatchPrefixInto("/a/b/c/d/e/rest", &buf)
 		if !ok {
 			t.Fatal("MatchPrefixInto did not match")
 		}
@@ -1120,6 +1119,9 @@ func TestMatchPrefixIntoReusesParams(t *testing.T) {
 		}
 		if got.Params.Len() != 5 {
 			t.Fatalf("params length = %d, want 5", got.Params.Len())
+		}
+		if buf.Len() != 5 {
+			t.Fatalf("buffer params length = %d, want 5", buf.Len())
 		}
 	})
 	if allocs != 0 {
@@ -1132,15 +1134,15 @@ func TestMatchPrefixIntoMissPreservesHeapParams(t *testing.T) {
 	router.Insert("/{a}/{b}/{c}/{d}/{e}", "many")
 
 	buf := NewParams(5)
-	got, ok := router.MatchPrefixInto("/miss", buf)
+	got, ok := router.MatchPrefixInto("/miss", &buf)
 	if ok {
 		t.Fatalf("MatchPrefixInto matched value %q, want miss", got.Value)
 	}
-	if got.Params.Len() != 0 {
-		t.Fatalf("miss params length = %d, want 0", got.Params.Len())
+	if buf.Len() != 0 {
+		t.Fatalf("miss params length = %d, want 0", buf.Len())
 	}
-	if got.Params.heap == nil || cap(got.Params.heap) < 5 {
-		t.Fatalf("miss params heap capacity = %d, want at least 5", cap(got.Params.heap))
+	if buf.heap == nil || cap(buf.heap) < 5 {
+		t.Fatalf("miss params heap capacity = %d, want at least 5", cap(buf.heap))
 	}
 }
 
@@ -1150,7 +1152,8 @@ func TestMatchPrefixIntoHeapParamsSurviveBacktracking(t *testing.T) {
 		router.Insert("/{id}", "id")
 		router.Insert("/{name}/bar", "bar")
 
-		got, ok := router.MatchPrefixInto("/abc/baz", NewParams(5))
+		params := NewParams(5)
+		got, ok := router.MatchPrefixInto("/abc/baz", &params)
 		if !ok {
 			t.Fatal("MatchPrefixInto did not match")
 		}
@@ -1160,6 +1163,9 @@ func TestMatchPrefixIntoHeapParamsSurviveBacktracking(t *testing.T) {
 		if !paramsEqual(got.Params, ParamsOf(Param{"id", "abc"})) {
 			t.Fatalf("params = %#v, want id=abc", got.Params.All())
 		}
+		if !paramsEqual(params, ParamsOf(Param{"id", "abc"})) {
+			t.Fatalf("buffer params = %#v, want id=abc", params.All())
+		}
 	})
 
 	t.Run("less specific later branch", func(t *testing.T) {
@@ -1167,7 +1173,8 @@ func TestMatchPrefixIntoHeapParamsSurviveBacktracking(t *testing.T) {
 		router.Insert("/user-{id}/view", "specific")
 		router.Insert("/{id}/view", "generic")
 
-		got, ok := router.MatchPrefixInto("/user-42/view/details", NewParams(5))
+		params := NewParams(5)
+		got, ok := router.MatchPrefixInto("/user-42/view/details", &params)
 		if !ok {
 			t.Fatal("MatchPrefixInto did not match")
 		}
@@ -1176,6 +1183,9 @@ func TestMatchPrefixIntoHeapParamsSurviveBacktracking(t *testing.T) {
 		}
 		if !paramsEqual(got.Params, ParamsOf(Param{"id", "42"})) {
 			t.Fatalf("params = %#v, want id=42", got.Params.All())
+		}
+		if !paramsEqual(params, ParamsOf(Param{"id", "42"})) {
+			t.Fatalf("buffer params = %#v, want id=42", params.All())
 		}
 	})
 }
@@ -1202,9 +1212,9 @@ func TestParamsAccessors(t *testing.T) {
 
 func TestParamsExportedBuilders(t *testing.T) {
 	params := NewParams(5)
-	params = params.Append("a", "1")
-	params = params.Append("b", "2")
-	params = params.Reset()
+	params.Append("a", "1")
+	params.Append("b", "2")
+	params.Reset()
 	if params.Len() != 0 {
 		t.Fatalf("Reset length = %d, want 0", params.Len())
 	}
@@ -1212,8 +1222,8 @@ func TestParamsExportedBuilders(t *testing.T) {
 		t.Fatalf("Reset heap capacity = %d, want at least 5", cap(params.heap))
 	}
 
-	params = params.Grow(6)
-	params = params.Append("c", "3")
+	params.Grow(6)
+	params.Append("c", "3")
 	if params.Len() != 1 || params.At(0) != (Param{"c", "3"}) {
 		t.Fatalf("Append after Grow = %#v, want c=3", params.All())
 	}
@@ -1329,11 +1339,11 @@ func TestMergeParamsInlineToHeap(t *testing.T) {
 
 func TestMergeParamsReusesHeapCapacity(t *testing.T) {
 	a := NewParams(8)
-	a = a.append("a", "1")
-	a = a.append("b", "2")
-	a = a.append("c", "3")
-	a = a.append("d", "4")
-	a = a.append("e", "5")
+	a.Append("a", "1")
+	a.Append("b", "2")
+	a.Append("c", "3")
+	a.Append("d", "4")
+	a.Append("e", "5")
 	b := ParamsOf(Param{"f", "6"}, Param{"g", "7"})
 
 	allocs := testing.AllocsPerRun(100, func() {
@@ -1359,7 +1369,7 @@ func TestMergeParamsGrowsHeap(t *testing.T) {
 		{"d", "4"},
 		{"e", "5"},
 	} {
-		a = a.append(param.Key, param.Val)
+		a.Append(param.Key, param.Val)
 	}
 	b := ParamsOf(Param{"f", "6"})
 

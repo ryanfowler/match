@@ -105,8 +105,8 @@ storage:
 ```go
 buf := match.NewParams(4)
 
-value, params, ok := router.MatchInto("/users/42", buf)
-_, _, _ = value, params, ok
+value, ok := router.MatchInto("/users/42", &buf)
+_, _, _ = value, buf, ok
 ```
 
 Use `MatchPrefix` when a route should match the front of a path and return the
@@ -261,8 +261,8 @@ is needed. `MatchInto` lets callers reuse a `Params` buffer across matches:
 params := match.NewParams(8)
 
 for _, path := range paths {
-	value, matchedParams, ok := router.MatchInto(path, params)
-	_, _, _ = value, matchedParams, ok
+	value, ok := router.MatchInto(path, &params)
+	_, _, _ = value, params, ok
 }
 ```
 
@@ -383,7 +383,7 @@ coexist because later segments disambiguate them.
 Parameters are collected after the winning route is selected, using the
 canonical route entry's capture names. `Params` stores up to four captures
 inline and grows to a slice only when needed. `MatchInto` and
-`MatchPrefixInto` reset and reuse a caller-provided `Params` value, which avoids
+`MatchPrefixInto` reset and reuse a caller-provided `*Params`, which avoids
 heap allocation for common hot-path routing loops.
 
 Prefix matching uses the same trie and route grammar as exact matching. It

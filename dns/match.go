@@ -55,12 +55,11 @@ func (r *Router[T]) Match(hostname string) (T, Params, bool) {
 	return r.root.match(hostname)
 }
 
-// MatchInto returns the value and parameters for hostname using params as
-// storage.
+// MatchInto returns the value for hostname using params as parameter storage.
 //
-// The input Params value is reset before matching. Use NewParams to create a
-// reusable Params buffer large enough for the expected number of captures.
-func (r *Router[T]) MatchInto(hostname string, params Params) (T, Params, bool) {
+// Params is reset before matching and must be non-nil. Use NewParams to create
+// a reusable Params buffer large enough for the expected number of captures.
+func (r *Router[T]) MatchInto(hostname string, params *Params) (T, bool) {
 	return r.root.matchInto(hostname, params)
 }
 
@@ -76,8 +75,8 @@ func (r *Router[T]) MatchSuffix(hostname string) (SuffixMatch[T], bool) {
 
 // MatchSuffixInto is like MatchSuffix, but uses params as parameter storage.
 //
-// The input Params value is reset before matching. Use NewParams to create a
-// reusable Params buffer large enough for the expected number of captures.
-func (r *Router[T]) MatchSuffixInto(hostname string, params Params) (SuffixMatch[T], bool) {
+// Params is reset before matching and must be non-nil. Use NewParams to create
+// a reusable Params buffer large enough for the expected number of captures.
+func (r *Router[T]) MatchSuffixInto(hostname string, params *Params) (SuffixMatch[T], bool) {
 	return r.root.matchSuffixInto(hostname, params)
 }

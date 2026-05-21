@@ -40,27 +40,55 @@ func NewParams(capacity int) Params {
 func ParamsOf(params ...Param) Params {
 	p := NewParams(len(params))
 	for i := range params {
-		p = p.append(params[i].Key, params[i].Val)
+		p.Append(params[i].Key, params[i].Val)
 	}
 	return p
 }
 
-// Reset returns p with no captured parameters while preserving reusable heap
-// storage.
-func (p Params) Reset() Params {
-	return p.reset()
+// Reset clears p while preserving reusable heap storage.
+func (p *Params) Reset() {
+	p.len = 0
+	if p.heap != nil {
+		p.heap = p.heap[:0]
+	}
 }
 
-// Grow returns p with enough reusable storage for capacity parameters.
+// Grow ensures p has enough reusable storage for capacity parameters.
 //
 // Capacity values of four or less use the inline storage built into Params.
-func (p Params) Grow(capacity int) Params {
-	return p.ensureCapacity(capacity)
+func (p *Params) Grow(capacity int) {
+	if capacity <= len(p.inline) || cap(p.heap) >= capacity {
+		return
+	}
+
+	heap := make([]Param, p.len, capacity)
+	if p.heap != nil {
+		copy(heap, p.heap[:p.len])
+	} else {
+		copy(heap, p.inline[:p.len])
+	}
+	p.heap = heap
 }
 
-// Append returns p with a captured parameter appended.
-func (p Params) Append(key, val string) Params {
-	return p.append(key, val)
+// Append appends a captured parameter to p.
+func (p *Params) Append(key, val string) {
+	if p.heap != nil {
+		p.heap = append(p.heap, Param{Key: key, Val: val})
+		p.len = len(p.heap)
+		return
+	}
+
+	if p.len < len(p.inline) {
+		p.inline[p.len] = Param{Key: key, Val: val}
+		p.len++
+		return
+	}
+
+	heap := make([]Param, p.len, p.len*2)
+	copy(heap, p.inline[:p.len])
+	heap = append(heap, Param{Key: key, Val: val})
+	p.heap = heap
+	p.len = len(heap)
 }
 
 // Merge returns a Params value containing a followed by b.
@@ -173,48 +201,4 @@ func (p Params) TryGet(key string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func (p Params) reset() Params {
-	p.len = 0
-	if p.heap != nil {
-		p.heap = p.heap[:0]
-	}
-	return p
-}
-
-func (p Params) ensureCapacity(capacity int) Params {
-	if capacity <= len(p.inline) || cap(p.heap) >= capacity {
-		return p
-	}
-
-	heap := make([]Param, p.len, capacity)
-	if p.heap != nil {
-		copy(heap, p.heap[:p.len])
-	} else {
-		copy(heap, p.inline[:p.len])
-	}
-	p.heap = heap
-	return p
-}
-
-func (p Params) append(key, val string) Params {
-	if p.heap != nil {
-		p.heap = append(p.heap, Param{Key: key, Val: val})
-		p.len = len(p.heap)
-		return p
-	}
-
-	if p.len < len(p.inline) {
-		p.inline[p.len] = Param{Key: key, Val: val}
-		p.len++
-		return p
-	}
-
-	heap := make([]Param, p.len, p.len*2)
-	copy(heap, p.inline[:p.len])
-	heap = append(heap, Param{Key: key, Val: val})
-	p.heap = heap
-	p.len = len(heap)
-	return p
 }

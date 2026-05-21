@@ -6,11 +6,12 @@ import (
 )
 
 var (
-	benchString string
-	benchParams Params
-	benchPrefix PrefixMatch[string]
-	benchRouter Router[string]
-	benchOK     bool
+	benchString   string
+	benchParams   Params
+	benchParamLen int
+	benchPrefix   PrefixMatch[string]
+	benchRouter   Router[string]
+	benchOK       bool
 )
 
 func BenchmarkMatch(b *testing.B) {
@@ -121,7 +122,8 @@ func BenchmarkMatchInto(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				benchString, benchParams, benchOK = router.MatchInto(bm.path, params)
+				benchString, benchOK = router.MatchInto(bm.path, &params)
+				benchParamLen = params.Len()
 			}
 		})
 	}
@@ -189,7 +191,7 @@ func BenchmarkMatchPrefixInto(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				benchPrefix, benchOK = router.MatchPrefixInto(bm.path, params)
+				benchPrefix, benchOK = router.MatchPrefixInto(bm.path, &params)
 			}
 		})
 	}
