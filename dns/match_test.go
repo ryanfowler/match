@@ -112,6 +112,20 @@ func TestCatchAllMatchesLeadingLabels(t *testing.T) {
 	}
 }
 
+func TestCatchAllMissesMalformedLeadingLabels(t *testing.T) {
+	var router Router[string]
+	router.Insert("{*subdomain}.example.com", "subdomain")
+
+	for _, host := range []string{
+		"api..example.com",
+		strings.Repeat("a", 64) + ".example.com",
+	} {
+		if got, _, ok := router.Match(host); ok {
+			t.Fatalf("match %q = %q, want miss", host, got)
+		}
+	}
+}
+
 func TestPrefixedCatchAll(t *testing.T) {
 	var router Router[string]
 	router.Insert("svc-{*subdomain}.example.com", "svc")
