@@ -148,6 +148,140 @@ func TestTrieReferencesCanonicalRouteEntriesAfterRouteGrowth(t *testing.T) {
 	}
 }
 
+func TestRouterCloneCopiesState(t *testing.T) {
+	var router Router[string]
+	router.Insert("/", "root")
+	router.Insert("/users/{id}", "user")
+	router.Insert("/files/{*path}", "file")
+	for i := 0; i < 12; i++ {
+		route := fmt.Sprintf("/static-%02d", i)
+		router.Insert(route, route)
+	}
+
+	clone := router.Clone()
+	clone.Insert("/clone-only", "clone")
+	router.Insert("/original-only", "original")
+
+	tests := []struct {
+		name   string
+		router *Router[string]
+		path   string
+		want   string
+		params Params
+	}{
+		{
+			name:   "clone keeps original route",
+			router: &clone,
+			path:   "/users/42",
+			want:   "user",
+			params: ParamsOf(Param{"id", "42"}),
+		},
+		{
+			name:   "clone keeps indexed static route",
+			router: &clone,
+			path:   "/static-11",
+			want:   "/static-11",
+			params: Params{},
+		},
+		{
+			name:   "clone has clone insert",
+			router: &clone,
+			path:   "/clone-only",
+			want:   "clone",
+			params: Params{},
+		},
+		{
+			name:   "original has original insert",
+			router: &router,
+			path:   "/original-only",
+			want:   "original",
+			params: Params{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, params, ok := tt.router.Match(tt.path)
+			if !ok {
+				t.Fatalf("match %q: not found", tt.path)
+			}
+			if got != tt.want {
+				t.Fatalf("match %q value = %q, want %q", tt.path, got, tt.want)
+			}
+			if !paramsEqual(params, tt.params) {
+				t.Fatalf("match %q params = %#v, want %#v", tt.path, params.All(), tt.params.All())
+			}
+		})
+	}
+
+	if got, _, ok := router.Match("/clone-only"); ok {
+		t.Fatalf("original matched clone-only route with value %q", got)
+	}
+	if got, _, ok := clone.Match("/original-only"); ok {
+		t.Fatalf("clone matched original-only route with value %q", got)
+	}
+	if err := router.TryInsert("/clone-only", "original clone-only"); err != nil {
+		t.Fatalf("original insert of clone-only route: %v", err)
+	}
+	if err := clone.TryInsert("/original-only", "clone original-only"); err != nil {
+		t.Fatalf("clone insert of original-only route: %v", err)
+	}
+
+	err := clone.TryInsert("/users/{name}", "duplicate")
+	var conflict *ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("clone duplicate insert error = %v, want ConflictError", err)
+	}
+	if conflict.With != "/users/{id}" {
+		t.Fatalf("clone duplicate conflicts with %q, want /users/{id}", conflict.With)
+	}
+}
+
+func TestRouterCloneUsesIndependentRouteEntriesAndTrie(t *testing.T) {
+	var router Router[int]
+	router.Insert("/first", 1)
+	router.Insert("/files/{*path}", 2)
+	for i := 0; i < 12; i++ {
+		router.Insert(fmt.Sprintf("/static-%02d", i), i+3)
+	}
+
+	clone := router.Clone()
+
+	staticEntry, ok := clone.root.root.matchPath("/first", 0)
+	if !ok {
+		t.Fatal("match cloned static route: not found")
+	}
+	if staticEntry != clone.root.routes[0] {
+		t.Fatal("cloned static trie entry does not reference cloned canonical route entry")
+	}
+	if staticEntry == router.root.routes[0] {
+		t.Fatal("cloned static trie entry references original route entry")
+	}
+
+	catchAllEntry, ok := clone.root.root.matchPath("/files/app.css", 0)
+	if !ok {
+		t.Fatal("match cloned catch-all route: not found")
+	}
+	if catchAllEntry != clone.root.routes[1] {
+		t.Fatal("cloned catch-all trie entry does not reference cloned canonical route entry")
+	}
+	if catchAllEntry == router.root.routes[1] {
+		t.Fatal("cloned catch-all trie entry references original route entry")
+	}
+
+	if router.root.absoluteRoot == nil || clone.root.absoluteRoot == nil {
+		t.Fatal("absolute root was not initialized")
+	}
+	originalIndexedChild := router.root.absoluteRoot.staticChild("static-11")
+	clonedIndexedChild := clone.root.absoluteRoot.staticChild("static-11")
+	if originalIndexedChild == nil || clonedIndexedChild == nil {
+		t.Fatal("indexed static child was not initialized")
+	}
+	if clonedIndexedChild == originalIndexedChild {
+		t.Fatal("cloned static child references original trie node")
+	}
+}
+
 func TestMatchRootCatchAllFallbackWithAbsoluteRoutes(t *testing.T) {
 	var router Router[string]
 	router.Insert("{*path}", "catch-all")

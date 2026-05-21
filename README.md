@@ -24,6 +24,7 @@ Key properties:
   time.
 - Parameter storage is allocation-conscious: up to four captures are stored
   inline, and `MatchInto` / `MatchPrefixInto` let hot paths reuse storage.
+- `Clone` can copy a route table before extending it independently.
 - After registration, a router can be shared by multiple goroutines for
   matching.
 

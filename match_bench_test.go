@@ -9,6 +9,7 @@ var (
 	benchString string
 	benchParams Params
 	benchPrefix PrefixMatch[string]
+	benchRouter Router[string]
 	benchOK     bool
 )
 
@@ -215,6 +216,30 @@ func BenchmarkInsert(b *testing.B) {
 						b.Fatal(err)
 					}
 				}
+			}
+		})
+	}
+}
+
+func BenchmarkClone(b *testing.B) {
+	benchmarks := []struct {
+		name   string
+		routes []string
+	}{
+		{name: "Mixed", routes: mixedBenchmarkRoutes()},
+		{name: "Many100", routes: generatedBenchmarkRoutes(100)},
+		{name: "Many1000", routes: generatedBenchmarkRoutes(1000)},
+		{name: "DynamicMany1000", routes: generatedDynamicBenchmarkRoutes(1000)},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			router := benchmarkRouter(b, bm.routes)
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				benchRouter = router.Clone()
 			}
 		})
 	}

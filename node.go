@@ -3,6 +3,8 @@ package match
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -104,6 +106,83 @@ type paramEdge[T any] struct {
 type catchAllEdge[T any] struct {
 	pattern segmentPattern
 	route   *routeEntry[T]
+}
+
+func (n *node[T]) clone() node[T] {
+	var cloned node[T]
+	entries := make(map[*routeEntry[T]]*routeEntry[T], len(n.routes))
+	cloned.routes = cloneRouteEntries(n.routes, entries)
+	cloned.normalized = maps.Clone(n.normalized)
+
+	for _, entry := range cloned.routes {
+		cloned.conflictIndex.add(entry)
+	}
+
+	nodes := make(map[*segmentNode[T]]*segmentNode[T])
+	cloneSegmentNodeInto(&n.root, &cloned.root, entries, nodes)
+	if n.absoluteRoot != nil {
+		cloned.absoluteRoot = nodes[n.absoluteRoot]
+	}
+	if n.rootPrefix != nil {
+		cloned.rootPrefix = entries[n.rootPrefix]
+	}
+
+	return cloned
+}
+
+func cloneRouteEntries[T any](routes []*routeEntry[T], entries map[*routeEntry[T]]*routeEntry[T]) []*routeEntry[T] {
+	if len(routes) == 0 {
+		return nil
+	}
+
+	clonedRoutes := make([]*routeEntry[T], len(routes))
+	for i, entry := range routes {
+		clonedEntry := new(routeEntry[T])
+		*clonedEntry = *entry
+		clonedEntry.patterns = slices.Clone(entry.patterns)
+		clonedEntry.captureNames = slices.Clone(entry.captureNames)
+		clonedRoutes[i] = clonedEntry
+		entries[entry] = clonedEntry
+	}
+	return clonedRoutes
+}
+
+func cloneSegmentNodeInto[T any](src, dst *segmentNode[T], entries map[*routeEntry[T]]*routeEntry[T], nodes map[*segmentNode[T]]*segmentNode[T]) {
+	nodes[src] = dst
+	if src.value != nil {
+		dst.value = entries[src.value]
+	}
+
+	if len(src.static) != 0 {
+		dst.static = slices.Clone(src.static)
+		for i := range src.static {
+			child := new(segmentNode[T])
+			cloneSegmentNodeInto(src.static[i].child, child, entries, nodes)
+			dst.static[i].child = child
+		}
+	}
+	if src.staticIndex != nil {
+		dst.staticIndex = maps.Clone(src.staticIndex)
+		for segment, child := range dst.staticIndex {
+			dst.staticIndex[segment] = nodes[child]
+		}
+	}
+
+	if len(src.params) != 0 {
+		dst.params = slices.Clone(src.params)
+		for i := range src.params {
+			child := new(segmentNode[T])
+			cloneSegmentNodeInto(src.params[i].child, child, entries, nodes)
+			dst.params[i].child = child
+		}
+	}
+
+	if len(src.catchAll) != 0 {
+		dst.catchAll = slices.Clone(src.catchAll)
+		for i := range src.catchAll {
+			dst.catchAll[i].route = entries[src.catchAll[i].route]
+		}
+	}
 }
 
 func (n *node[T]) insert(route string, value T) error {
