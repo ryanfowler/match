@@ -2,67 +2,46 @@ package dns
 
 import (
 	"strings"
+
+	"github.com/ryanfowler/match/internal/conflictindex"
 )
 
 func (i *routeConflictIndex[T]) add(entry *routeEntry[T]) {
 	if len(entry.captures) == 0 {
 		return
 	}
-	if i.byLabelCount == nil {
-		i.byLabelCount = make(map[int]*routeConflictBucket[T])
-	}
-	bucket := i.byLabelCount[entry.labelCount]
-	if bucket == nil {
-		bucket = &routeConflictBucket[T]{}
-		i.byLabelCount[entry.labelCount] = bucket
-	}
-	bucket.add(entry)
-	if entry.hasCatchAll {
-		i.catchAll.add(entry)
-	}
-}
-
-func (b *routeConflictBucket[T]) add(entry *routeEntry[T]) {
-	b.all = append(b.all, entry)
-	if !entry.hasFirstStaticLabel {
-		b.wildcard = append(b.wildcard, entry)
-		return
-	}
-	if b.static == nil {
-		b.static = make(map[string][]*routeEntry[T])
-	}
-	b.static[entry.firstStaticLabel] = append(b.static[entry.firstStaticLabel], entry)
+	i.index.Add(entry.labelCount, entry.firstStaticLabel, entry.hasFirstStaticLabel, entry.hasCatchAll, entry)
 }
 
 func (i *routeConflictIndex[T]) findConflict(entry *routeEntry[T]) *routeEntry[T] {
 	var best *routeEntry[T]
-	if bucket := i.byLabelCount[entry.labelCount]; bucket != nil {
-		best = earlierConflict(best, bucket.findConflict(entry, 0))
+	if bucket := i.index.ByCount[entry.labelCount]; bucket != nil {
+		best = earlierConflict(best, findConflictInBucket(bucket, entry, 0))
 	}
 
 	if entry.hasCatchAll {
-		for labelCount, bucket := range i.byLabelCount {
+		for labelCount, bucket := range i.index.ByCount {
 			if labelCount == entry.labelCount {
 				continue
 			}
-			best = earlierConflict(best, bucket.findConflict(entry, 0))
+			best = earlierConflict(best, findConflictInBucket(bucket, entry, 0))
 		}
 		return best
 	}
 
-	return earlierConflict(best, i.catchAll.findConflict(entry, entry.labelCount))
+	return earlierConflict(best, findConflictInBucket(&i.index.CatchAll, entry, entry.labelCount))
 }
 
-func (b *routeConflictBucket[T]) findConflict(entry *routeEntry[T], skipLabelCount int) *routeEntry[T] {
-	if b == nil {
+func findConflictInBucket[T any](bucket *conflictindex.Bucket[*routeEntry[T]], entry *routeEntry[T], skipLabelCount int) *routeEntry[T] {
+	if bucket == nil {
 		return nil
 	}
 	if entry.hasFirstStaticLabel {
-		static := findConflictInRoutes(b.static[entry.firstStaticLabel], entry, skipLabelCount)
-		wildcard := findConflictInRoutes(b.wildcard, entry, skipLabelCount)
+		static := findConflictInRoutes(bucket.Static[entry.firstStaticLabel], entry, skipLabelCount)
+		wildcard := findConflictInRoutes(bucket.Wildcard, entry, skipLabelCount)
 		return earlierConflict(static, wildcard)
 	}
-	return findConflictInRoutes(b.all, entry, skipLabelCount)
+	return findConflictInRoutes(bucket.All, entry, skipLabelCount)
 }
 
 func findConflictInRoutes[T any](routes []*routeEntry[T], entry *routeEntry[T], skipLabelCount int) *routeEntry[T] {

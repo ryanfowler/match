@@ -2,67 +2,46 @@ package match
 
 import (
 	"strings"
+
+	"github.com/ryanfowler/match/internal/conflictindex"
 )
 
 func (i *routeConflictIndex[T]) add(entry *routeEntry[T]) {
 	if len(entry.captures) == 0 {
 		return
 	}
-	if i.bySegmentCount == nil {
-		i.bySegmentCount = make(map[int]*routeConflictBucket[T])
-	}
-	bucket := i.bySegmentCount[entry.segmentCount]
-	if bucket == nil {
-		bucket = &routeConflictBucket[T]{}
-		i.bySegmentCount[entry.segmentCount] = bucket
-	}
-	bucket.add(entry)
-	if entry.hasCatchAll {
-		i.catchAll.add(entry)
-	}
-}
-
-func (b *routeConflictBucket[T]) add(entry *routeEntry[T]) {
-	b.all = append(b.all, entry)
-	if !entry.hasFirstStaticSegment {
-		b.wildcard = append(b.wildcard, entry)
-		return
-	}
-	if b.static == nil {
-		b.static = make(map[string][]*routeEntry[T])
-	}
-	b.static[entry.firstStaticSegment] = append(b.static[entry.firstStaticSegment], entry)
+	i.index.Add(entry.segmentCount, entry.firstStaticSegment, entry.hasFirstStaticSegment, entry.hasCatchAll, entry)
 }
 
 func (i *routeConflictIndex[T]) findConflict(entry *routeEntry[T]) *routeEntry[T] {
 	var best *routeEntry[T]
-	if bucket := i.bySegmentCount[entry.segmentCount]; bucket != nil {
-		best = earlierConflict(best, bucket.findConflict(entry, 0))
+	if bucket := i.index.ByCount[entry.segmentCount]; bucket != nil {
+		best = earlierConflict(best, findConflictInBucket(bucket, entry, 0))
 	}
 
 	if entry.hasCatchAll {
-		for segmentCount, bucket := range i.bySegmentCount {
+		for segmentCount, bucket := range i.index.ByCount {
 			if segmentCount == entry.segmentCount {
 				continue
 			}
-			best = earlierConflict(best, bucket.findConflict(entry, 0))
+			best = earlierConflict(best, findConflictInBucket(bucket, entry, 0))
 		}
 		return best
 	}
 
-	return earlierConflict(best, i.catchAll.findConflict(entry, entry.segmentCount))
+	return earlierConflict(best, findConflictInBucket(&i.index.CatchAll, entry, entry.segmentCount))
 }
 
-func (b *routeConflictBucket[T]) findConflict(entry *routeEntry[T], skipSegmentCount int) *routeEntry[T] {
-	if b == nil {
+func findConflictInBucket[T any](bucket *conflictindex.Bucket[*routeEntry[T]], entry *routeEntry[T], skipSegmentCount int) *routeEntry[T] {
+	if bucket == nil {
 		return nil
 	}
 	if entry.hasFirstStaticSegment {
-		static := findConflictInRoutes(b.static[entry.firstStaticSegment], entry, skipSegmentCount)
-		wildcard := findConflictInRoutes(b.wildcard, entry, skipSegmentCount)
+		static := findConflictInRoutes(bucket.Static[entry.firstStaticSegment], entry, skipSegmentCount)
+		wildcard := findConflictInRoutes(bucket.Wildcard, entry, skipSegmentCount)
 		return earlierConflict(static, wildcard)
 	}
-	return findConflictInRoutes(b.all, entry, skipSegmentCount)
+	return findConflictInRoutes(bucket.All, entry, skipSegmentCount)
 }
 
 func findConflictInRoutes[T any](routes []*routeEntry[T], entry *routeEntry[T], skipSegmentCount int) *routeEntry[T] {
