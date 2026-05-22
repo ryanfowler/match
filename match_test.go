@@ -138,6 +138,9 @@ func TestTrieReferencesCanonicalRouteEntriesAfterRouteGrowth(t *testing.T) {
 	if staticEntry != router.root.routes[0] {
 		t.Fatal("static trie entry does not reference canonical route entry")
 	}
+	if exactEntry := router.root.exactStatic["/first"]; exactEntry != router.root.routes[0] {
+		t.Fatal("exact static entry does not reference canonical route entry")
+	}
 
 	catchAllEntry, ok := router.root.root.matchPath("/files/app.css", 0)
 	if !ok {
@@ -279,6 +282,53 @@ func TestRouterCloneUsesIndependentRouteEntriesAndTrie(t *testing.T) {
 	}
 	if clonedIndexedChild == originalIndexedChild {
 		t.Fatal("cloned static child references original trie node")
+	}
+
+	exactEntry := clone.root.exactStatic["/first"]
+	if exactEntry != clone.root.routes[0] {
+		t.Fatal("cloned exact static entry does not reference cloned canonical route entry")
+	}
+	if exactEntry == router.root.routes[0] {
+		t.Fatal("cloned exact static entry references original route entry")
+	}
+}
+
+func TestExactStaticMapTracksLiteralRoutes(t *testing.T) {
+	var router Router[string]
+	router.Insert("/fixed", "fixed")
+	router.Insert("/users/{id}", "user")
+	router.Insert("/{{", "brace")
+	router.Insert("/files/{*path}", "file")
+
+	tests := []struct {
+		path       string
+		routeIndex int
+	}{
+		{"/fixed", 0},
+		{"/{", 2},
+	}
+
+	for _, tt := range tests {
+		if got := router.root.exactStatic[tt.path]; got != router.root.routes[tt.routeIndex] {
+			t.Fatalf("exactStatic[%q] = %p, want route entry %p", tt.path, got, router.root.routes[tt.routeIndex])
+		}
+		got, params, ok := router.Match(tt.path)
+		if !ok {
+			t.Fatalf("Match(%q): not found", tt.path)
+		}
+		if got != router.root.routes[tt.routeIndex].value {
+			t.Fatalf("Match(%q) = %q, want %q", tt.path, got, router.root.routes[tt.routeIndex].value)
+		}
+		if params.Len() != 0 {
+			t.Fatalf("Match(%q) params length = %d, want 0", tt.path, params.Len())
+		}
+	}
+
+	if _, ok := router.root.exactStatic["/users/{id}"]; ok {
+		t.Fatal("parameter route was stored in exactStatic")
+	}
+	if _, ok := router.root.exactStatic["/files/{*path}"]; ok {
+		t.Fatal("catch-all route was stored in exactStatic")
 	}
 }
 
