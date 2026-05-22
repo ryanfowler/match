@@ -25,28 +25,9 @@ func (n *node[T]) insertLiteral(route string, value T) error {
 	}
 	normalized := normalizedStaticLiteral(route)
 	catchAllStaticConflict := n.root.conflictsWithCatchAllStaticPatterns(patterns, 0)
+	needsConflictCheck := entry.captureCount != 0 || catchAllStaticConflict
 
-	if n.normalized == nil {
-		n.normalized = make(map[string]string)
-	}
-	if existing, ok := n.normalized[normalized]; ok {
-		return &ConflictError{Route: entry.route, With: existing}
-	}
-
-	if entry.captureCount != 0 || catchAllStaticConflict {
-		if existing := n.conflictIndex.findConflict(entry); existing != nil {
-			return &ConflictError{Route: entry.route, With: existing.route}
-		}
-	}
-
-	n.normalized[normalized] = entry.route
-	n.routes = append(n.routes, entry)
-	n.addExactStatic(entry)
-	n.addFastRoute(entry)
-	n.conflictIndex.add(entry)
-	n.insertTree(entry)
-	n.refreshRootPrefix(entry)
-	return nil
+	return n.finishInsert(entry, normalized, needsConflictCheck)
 }
 
 func (n *node[T]) insertDynamic(route string, value T) error {
@@ -71,7 +52,12 @@ func (n *node[T]) insertDynamic(route string, value T) error {
 		hasCatchAll:           hasCatchAll(patterns),
 		value:                 value,
 	}
+	needsConflictCheck := entry.captureCount != 0 || n.root.conflictsWithCatchAllStatic(segments, 0)
 
+	return n.finishInsert(entry, normalized, needsConflictCheck)
+}
+
+func (n *node[T]) finishInsert(entry *routeEntry[T], normalized string, needsConflictCheck bool) error {
 	if n.normalized == nil {
 		n.normalized = make(map[string]string)
 	}
@@ -79,7 +65,7 @@ func (n *node[T]) insertDynamic(route string, value T) error {
 		return &ConflictError{Route: entry.route, With: existing}
 	}
 
-	if entry.captureCount != 0 || n.root.conflictsWithCatchAllStatic(segments, 0) {
+	if needsConflictCheck {
 		if existing := n.conflictIndex.findConflict(entry); existing != nil {
 			return &ConflictError{Route: entry.route, With: existing.route}
 		}
