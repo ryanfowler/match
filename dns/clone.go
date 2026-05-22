@@ -9,15 +9,27 @@ func (n *node[T]) clone() node[T] {
 	var cloned node[T]
 	entries := make(map[*routeEntry[T]]*routeEntry[T], len(n.routes))
 	cloned.routes = cloneRouteEntries(n.routes, entries)
+	cloned.exactStatic = cloneExactStatic(n.exactStatic, cloned.routes)
+	cloned.maxExactStaticHostLen = n.maxExactStaticHostLen
+	cloned.hasDynamic = n.hasDynamic
 	cloned.normalized = maps.Clone(n.normalized)
-
-	for _, entry := range cloned.routes {
-		cloned.conflictIndex.add(entry)
-	}
+	cloned.conflictIndex = n.conflictIndex.clone(cloned.routes)
 
 	nodes := make(map[*labelNode[T]]*labelNode[T])
 	cloneLabelNodeInto(&n.root, &cloned.root, entries, nodes)
 
+	return cloned
+}
+
+func cloneExactStatic[T any](exactStatic map[string]*routeEntry[T], routes []*routeEntry[T]) map[string]*routeEntry[T] {
+	if len(exactStatic) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]*routeEntry[T], len(exactStatic))
+	for host, entry := range exactStatic {
+		cloned[host] = routes[entry.order]
+	}
 	return cloned
 }
 

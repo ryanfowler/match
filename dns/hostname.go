@@ -35,14 +35,6 @@ func nextHostLabel(host string, start int) (string, int, bool) {
 	return host[start:], -1, true
 }
 
-func validHostname(host string) (string, bool) {
-	host, ok := hostnameWithinBounds(host)
-	if !ok {
-		return "", false
-	}
-	return host, validHostnameLabels(host)
-}
-
 func hostnameWithinBounds(host string) (string, bool) {
 	host = trimRootDot(host)
 	if host == "" || len(host) > maxHostnameLen {

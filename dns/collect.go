@@ -50,15 +50,19 @@ func (n *labelNode[T]) matchSuffixHost(host string, end, consumed int) (suffixRo
 			}
 		}
 
-		remaining := host[:end]
-		for i := range n.catchAll {
-			if _, ok := matchCatchAllPattern(n.catchAll[i].pattern, remaining); ok {
-				candidate := suffixRouteMatch[T]{
-					entry:     n.catchAll[i].route,
-					prefixEnd: -1,
-					consumed:  consumed + countHostnameLabels(remaining),
+		if len(n.catchAll) != 0 {
+			remaining := host[:end]
+			if validHostnameLabels(remaining) {
+				for i := range n.catchAll {
+					if _, ok := matchCatchAllPattern(n.catchAll[i].pattern, remaining); ok {
+						candidate := suffixRouteMatch[T]{
+							entry:     n.catchAll[i].route,
+							prefixEnd: -1,
+							consumed:  consumed + countHostnameLabels(remaining),
+						}
+						best = betterSuffixMatch(best, candidate)
+					}
 				}
-				best = betterSuffixMatch(best, candidate)
 			}
 		}
 	}

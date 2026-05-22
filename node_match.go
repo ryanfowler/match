@@ -71,13 +71,20 @@ func (n *node[T]) matchExactStatic(path string) (*routeEntry[T], bool) {
 }
 
 func (n *node[T]) matchPrefix(path string) (PrefixMatch[T], bool) {
-	match, ok := n.matchPrefixRoute(path)
-	if !ok {
-		return PrefixMatch[T]{}, false
+	if n.hasDynamic {
+		match, ok := n.matchPrefixRoute(path)
+		if !ok {
+			return PrefixMatch[T]{}, false
+		}
+		var params Params
+		collectParams(match.entry, path, &params)
+		return match.prefix(path, params), true
 	}
-	var params Params
-	collectParams(match.entry, path, &params)
-	return match.prefix(path, params), true
+
+	if match, ok := n.matchStaticPrefixRoute(path); ok {
+		return match.prefix(path, Params{}), true
+	}
+	return PrefixMatch[T]{}, false
 }
 
 func (n *node[T]) matchPrefixInto(path string, params *Params) (PrefixMatch[T], bool) {
@@ -98,6 +105,45 @@ func (n *node[T]) matchPrefixRoute(path string) (prefixMatch[T], bool) {
 		ok = true
 	}
 	return best, ok
+}
+
+func (n *node[T]) matchStaticPrefixRoute(path string) (prefixMatch[T], bool) {
+	if len(n.exactStatic) == 0 {
+		return prefixMatch[T]{}, false
+	}
+
+	if entry, ok := n.matchExactStatic(path); ok {
+		return prefixMatch[T]{
+			entry:     entry,
+			restIndex: -1,
+			consumed:  len(path) + 1,
+		}, true
+	}
+
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] != '/' {
+			continue
+		}
+		if i == 0 {
+			if entry := n.exactStatic["/"]; entry != nil {
+				return prefixMatch[T]{
+					entry:     entry,
+					restIndex: 1,
+					consumed:  1,
+				}, true
+			}
+			continue
+		}
+		if entry := n.exactStatic[path[:i]]; entry != nil {
+			return prefixMatch[T]{
+				entry:     entry,
+				restIndex: i + 1,
+				consumed:  i + 1,
+			}, true
+		}
+	}
+
+	return prefixMatch[T]{}, false
 }
 
 func (n *node[T]) rootPrefixMatch(path string) (prefixMatch[T], bool) {
