@@ -120,12 +120,14 @@ Router[T]
   root node[T]
 
 node[T]
-  routes          []*routeEntry[T]
-  normalized      map[string]string
-  conflictIndex   routeConflictIndex[T]
-  root            segmentNode[T]
-  absoluteRoot    *segmentNode[T]
-  rootPrefix      *routeEntry[T]
+  routes                []*routeEntry[T]
+  exactStatic           map[string]*routeEntry[T]
+  maxExactStaticPathLen int
+  normalized            map[string]string
+  conflictIndex         routeConflictIndex[T]
+  root                  segmentNode[T]
+  absoluteRoot          *segmentNode[T]
+  rootPrefix            *routeEntry[T]
 ```
 
 The main subsystems are:
@@ -150,10 +152,12 @@ TryInsert(route, value)
   -> build routeEntry
   -> reject duplicate normalized shape
   -> reject ambiguous conflicts
+  -> add exact static routeEntry to exactStatic
   -> insert routeEntry into trie
   -> add routeEntry to conflict index
 
 Match(path)
+  -> check exactStatic for a full-path literal hit
   -> choose root search node
   -> walk trie by path segment
   -> select winning routeEntry
@@ -363,6 +367,7 @@ build entry
   -> find ambiguous conflict if needed
   -> store normalized shape
   -> append to node.routes
+  -> cache exact static routes
   -> add to conflict index
   -> insert into segment trie
   -> refresh root-prefix cache
@@ -441,10 +446,17 @@ paths. For example, `{*path}` can match `/other` and capture `/other`.
 
 ```text
 node.match(path)
+  -> entry := exactStatic[path] if path is not longer than any exact static route
   -> root, index := matchRoot(path)
   -> entry := root.matchPath(path, index)
   -> collect params if entry found
 ```
+
+The exact static map contains routes with no params or catch-all. A full-path
+literal hit can return immediately because exact static routes are always more
+specific than dynamic routes. `maxExactStaticPathLen` avoids hashing paths that
+cannot be exact static matches because they are longer than every exact static
+route.
 
 `segmentNode.matchPath` is recursive:
 
@@ -705,6 +717,7 @@ matching. Matching reads immutable route entries and trie structures.
 Insertion mutates:
 
 - `node.routes`
+- `node.exactStatic` and `node.maxExactStaticPathLen`
 - `node.normalized`
 - `node.conflictIndex`
 - `node.root` and descendants
@@ -720,6 +733,8 @@ The implementation is tuned around common routing workloads:
 
 - Literal-only routes use a parser fast path.
 - Routes are parsed once during insertion.
+- Exact static matches can return from a full-path map lookup before walking the
+  trie.
 - Matching walks by path segment instead of scanning all routes.
 - Static edges stay slice-backed for small fanout and gain a map after the
   ninth static child.

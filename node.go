@@ -66,12 +66,14 @@ type routeEntry[T any] struct {
 }
 
 type node[T any] struct {
-	routes        []*routeEntry[T]
-	normalized    map[string]string
-	conflictIndex routeConflictIndex[T]
-	root          segmentNode[T]
-	absoluteRoot  *segmentNode[T]
-	rootPrefix    *routeEntry[T]
+	routes                []*routeEntry[T]
+	exactStatic           map[string]*routeEntry[T]
+	maxExactStaticPathLen int
+	normalized            map[string]string
+	conflictIndex         routeConflictIndex[T]
+	root                  segmentNode[T]
+	absoluteRoot          *segmentNode[T]
+	rootPrefix            *routeEntry[T]
 }
 
 type routeConflictIndex[T any] struct {
@@ -112,6 +114,8 @@ func (n *node[T]) clone() node[T] {
 	var cloned node[T]
 	entries := make(map[*routeEntry[T]]*routeEntry[T], len(n.routes))
 	cloned.routes = cloneRouteEntries(n.routes, entries)
+	cloned.exactStatic = cloneExactStatic(n.exactStatic, entries)
+	cloned.maxExactStaticPathLen = n.maxExactStaticPathLen
 	cloned.normalized = maps.Clone(n.normalized)
 
 	for _, entry := range cloned.routes {
@@ -127,6 +131,18 @@ func (n *node[T]) clone() node[T] {
 		cloned.rootPrefix = entries[n.rootPrefix]
 	}
 
+	return cloned
+}
+
+func cloneExactStatic[T any](exactStatic map[string]*routeEntry[T], entries map[*routeEntry[T]]*routeEntry[T]) map[string]*routeEntry[T] {
+	if len(exactStatic) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]*routeEntry[T], len(exactStatic))
+	for path, entry := range exactStatic {
+		cloned[path] = entries[entry]
+	}
 	return cloned
 }
 
@@ -222,6 +238,7 @@ func (n *node[T]) insertLiteral(route string, value T) error {
 
 	n.normalized[normalized] = entry.route
 	n.routes = append(n.routes, entry)
+	n.addExactStatic(entry)
 	n.conflictIndex.add(entry)
 	n.insertTree(entry)
 	n.refreshRootPrefix(entry)
@@ -266,10 +283,24 @@ func (n *node[T]) insertDynamic(route string, value T) error {
 
 	n.normalized[normalized] = entry.route
 	n.routes = append(n.routes, entry)
+	n.addExactStatic(entry)
 	n.conflictIndex.add(entry)
 	n.insertTree(entry)
 	n.refreshRootPrefix(entry)
 	return nil
+}
+
+func (n *node[T]) addExactStatic(entry *routeEntry[T]) {
+	if entry.captureCount != 0 || entry.hasCatchAll {
+		return
+	}
+	if n.exactStatic == nil {
+		n.exactStatic = make(map[string]*routeEntry[T])
+	}
+	n.exactStatic[entry.route] = entry
+	if len(entry.route) > n.maxExactStaticPathLen {
+		n.maxExactStaticPathLen = len(entry.route)
+	}
 }
 
 func normalizedStaticLiteral(route string) string {
@@ -370,6 +401,9 @@ func earlierConflict[T any](a, b *routeEntry[T]) *routeEntry[T] {
 }
 
 func (n *node[T]) match(route string) (T, Params, bool) {
+	if entry, ok := n.matchExactStatic(route); ok {
+		return entry.value, Params{}, true
+	}
 	root, index, _ := n.matchRoot(route)
 	entry, ok := root.matchPath(route, index)
 	if !ok {
@@ -391,6 +425,14 @@ func (n *node[T]) matchInto(route string, params *Params) (T, bool) {
 	}
 	collectParams(entry, route, params)
 	return entry.value, true
+}
+
+func (n *node[T]) matchExactStatic(path string) (*routeEntry[T], bool) {
+	if len(n.exactStatic) == 0 || len(path) > n.maxExactStaticPathLen {
+		return nil, false
+	}
+	entry, ok := n.exactStatic[path]
+	return entry, ok
 }
 
 func (n *node[T]) matchPrefix(path string) (PrefixMatch[T], bool) {
