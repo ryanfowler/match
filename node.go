@@ -88,11 +88,12 @@ type routeConflictBucket[T any] struct {
 }
 
 type segmentNode[T any] struct {
-	static      []staticEdge[T]
-	staticIndex map[string]*segmentNode[T]
-	params      []paramEdge[T]
-	catchAll    []catchAllEdge[T]
-	value       *routeEntry[T]
+	static        []staticEdge[T]
+	staticIndex   map[string]*segmentNode[T]
+	plainParam    *paramEdge[T]
+	affixedParams []paramEdge[T]
+	catchAll      []catchAllEdge[T]
+	value         *routeEntry[T]
 }
 
 type staticEdge[T any] struct {
@@ -184,12 +185,20 @@ func cloneSegmentNodeInto[T any](src, dst *segmentNode[T], entries map[*routeEnt
 		}
 	}
 
-	if len(src.params) != 0 {
-		dst.params = slices.Clone(src.params)
-		for i := range src.params {
+	if src.plainParam != nil {
+		dst.plainParam = new(paramEdge[T])
+		*dst.plainParam = *src.plainParam
+		child := new(segmentNode[T])
+		cloneSegmentNodeInto(src.plainParam.child, child, entries, nodes)
+		dst.plainParam.child = child
+	}
+
+	if len(src.affixedParams) != 0 {
+		dst.affixedParams = slices.Clone(src.affixedParams)
+		for i := range src.affixedParams {
 			child := new(segmentNode[T])
-			cloneSegmentNodeInto(src.params[i].child, child, entries, nodes)
-			dst.params[i].child = child
+			cloneSegmentNodeInto(src.affixedParams[i].child, child, entries, nodes)
+			dst.affixedParams[i].child = child
 		}
 	}
 
@@ -477,7 +486,7 @@ func (n *node[T]) rootPrefixMatch(path string) (prefixMatch[T], bool) {
 }
 
 func (n *node[T]) matchRoot(route string) (*segmentNode[T], int, bool) {
-	if route == "" || route[0] != '/' || len(n.root.params) != 0 || len(n.root.catchAll) != 0 {
+	if route == "" || route[0] != '/' || n.root.plainParam != nil || len(n.root.affixedParams) != 0 || len(n.root.catchAll) != 0 {
 		return &n.root, 0, false
 	}
 	if n.absoluteRoot != nil {
@@ -509,19 +518,32 @@ func (n *node[T]) insertTree(entry *routeEntry[T]) {
 			current = child
 		} else {
 			var child *segmentNode[T]
-			for j := range current.params {
-				if sameSegmentPattern(current.params[j].pattern, pattern) {
-					child = current.params[j].child
-					break
+			if pattern.prefix == "" && pattern.suffix == "" {
+				if current.plainParam != nil && sameSegmentPattern(current.plainParam.pattern, pattern) {
+					child = current.plainParam.child
 				}
-			}
-			if child == nil {
-				child = &segmentNode[T]{}
-				current.params = append(current.params, paramEdge[T]{
-					pattern: pattern,
-					child:   child,
-				})
-				sortParamEdges(current.params)
+				if child == nil {
+					child = &segmentNode[T]{}
+					current.plainParam = &paramEdge[T]{
+						pattern: pattern,
+						child:   child,
+					}
+				}
+			} else {
+				for j := range current.affixedParams {
+					if sameSegmentPattern(current.affixedParams[j].pattern, pattern) {
+						child = current.affixedParams[j].child
+						break
+					}
+				}
+				if child == nil {
+					child = &segmentNode[T]{}
+					current.affixedParams = append(current.affixedParams, paramEdge[T]{
+						pattern: pattern,
+						child:   child,
+					})
+					sortParamEdges(current.affixedParams)
+				}
 			}
 			current = child
 		}
@@ -547,32 +569,44 @@ func (n *segmentNode[T]) matchPath(path string, index int) (*routeEntry[T], bool
 		}
 	}
 
-	for i := range n.params {
-		pattern := n.params[i].pattern
-		if pattern.prefix == "" && pattern.suffix == "" {
-			if segment == "" {
+	if len(n.affixedParams) == 0 {
+		if n.plainParam != nil && segment != "" {
+			if entry, ok := n.plainParam.child.matchPath(path, next); ok {
+				return entry, true
+			}
+		}
+	} else {
+		for i := range n.affixedParams {
+			pattern := n.affixedParams[i].pattern
+			if _, ok := matchAffixedParamPattern(pattern, segment); !ok {
 				continue
 			}
-		} else if _, ok := matchAffixedParamPattern(pattern, segment); !ok {
-			continue
-		}
-		if entry, ok := n.params[i].child.matchPath(path, next); ok {
-			bestEntry := entry
-			for j := i + 1; j < len(n.params); j++ {
-				pattern := n.params[j].pattern
-				if pattern.prefix == "" && pattern.suffix == "" {
-					if segment == "" {
+			if entry, ok := n.affixedParams[i].child.matchPath(path, next); ok {
+				bestEntry := entry
+				for j := i + 1; j < len(n.affixedParams); j++ {
+					pattern := n.affixedParams[j].pattern
+					if _, ok := matchAffixedParamPattern(pattern, segment); !ok {
 						continue
 					}
-				} else if _, ok := matchAffixedParamPattern(pattern, segment); !ok {
-					continue
+					entry, ok := n.affixedParams[j].child.matchPath(path, next)
+					if ok && moreSpecificRoute(entry, bestEntry) {
+						bestEntry = entry
+					}
 				}
-				entry, ok := n.params[j].child.matchPath(path, next)
-				if ok && moreSpecificRoute(entry, bestEntry) {
-					bestEntry = entry
+				if n.plainParam != nil && segment != "" {
+					entry, ok := n.plainParam.child.matchPath(path, next)
+					if ok && moreSpecificRoute(entry, bestEntry) {
+						bestEntry = entry
+					}
 				}
+				return bestEntry, true
 			}
-			return bestEntry, true
+		}
+
+		if n.plainParam != nil && segment != "" {
+			if entry, ok := n.plainParam.child.matchPath(path, next); ok {
+				return entry, true
+			}
 		}
 	}
 
@@ -618,17 +652,27 @@ func (n *segmentNode[T]) matchPrefixPath(path string, index int, ignoreValue boo
 			}
 		}
 
-		for i := range n.params {
-			pattern := n.params[i].pattern
-			if pattern.prefix == "" && pattern.suffix == "" {
-				if segment == "" {
+		if len(n.affixedParams) == 0 {
+			if n.plainParam != nil && segment != "" {
+				if candidate, ok := n.plainParam.child.matchPrefixPath(path, next, false); ok {
+					best = betterPrefixMatch(best, candidate)
+				}
+			}
+		} else {
+			for i := range n.affixedParams {
+				pattern := n.affixedParams[i].pattern
+				if _, ok := matchAffixedParamPattern(pattern, segment); !ok {
 					continue
 				}
-			} else if _, ok := matchAffixedParamPattern(pattern, segment); !ok {
-				continue
+				if candidate, ok := n.affixedParams[i].child.matchPrefixPath(path, next, false); ok {
+					best = betterPrefixMatch(best, candidate)
+				}
 			}
-			if candidate, ok := n.params[i].child.matchPrefixPath(path, next, false); ok {
-				best = betterPrefixMatch(best, candidate)
+
+			if n.plainParam != nil && segment != "" {
+				if candidate, ok := n.plainParam.child.matchPrefixPath(path, next, false); ok {
+					best = betterPrefixMatch(best, candidate)
+				}
 			}
 		}
 
