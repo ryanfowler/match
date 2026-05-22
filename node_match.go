@@ -10,9 +10,6 @@ func (n *node[T]) match(route string) (T, Params, bool) {
 			return val, Params{}, false
 		}
 		var params Params
-		if n.maxSimpleCaptureCount > inlineParamCapacity {
-			params.Grow(n.maxSimpleCaptureCount)
-		}
 		if entry, ok := n.fastRoot.match(route, 0, &params); ok {
 			applySimpleParamNames(entry, &params)
 			return entry.value, params, true
@@ -40,9 +37,6 @@ func (n *node[T]) matchInto(route string, params *Params) (T, bool) {
 		if !n.hasSimpleDynamic {
 			var val T
 			return val, false
-		}
-		if n.maxSimpleCaptureCount > inlineParamCapacity {
-			params.Grow(n.maxSimpleCaptureCount)
 		}
 		if entry, ok := n.fastRoot.match(route, 0, params); ok {
 			applySimpleParamNames(entry, params)
