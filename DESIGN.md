@@ -538,16 +538,23 @@ It is shaped like this:
 
 ```go
 type routeConflictIndex[T any] struct {
-	bySegmentCount map[int]*routeConflictBucket[T]
-	catchAll       routeConflictBucket[T]
+	index conflictindex.Index[*routeEntry[T]]
 }
 
-type routeConflictBucket[T any] struct {
-	all      []*routeEntry[T]
-	static   map[string][]*routeEntry[T]
-	wildcard []*routeEntry[T]
+type Index[E any] struct {
+	ByCount  map[int]*Bucket[E]
+	CatchAll Bucket[E]
+}
+
+type Bucket[E any] struct {
+	All      []E
+	Static   map[string][]E
+	Wildcard []E
 }
 ```
+
+The DNS package uses the same internal helper, keyed by label count instead of
+path segment count.
 
 Only routes with captures are added to the index. This keeps literal route
 insertion cheap and allows static routes to overlap dynamic routes when

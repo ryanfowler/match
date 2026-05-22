@@ -3,6 +3,8 @@ package match
 import (
 	"errors"
 	"fmt"
+
+	"github.com/ryanfowler/match/internal/conflictindex"
 )
 
 var (
@@ -67,14 +69,7 @@ type node[T any] struct {
 }
 
 type routeConflictIndex[T any] struct {
-	bySegmentCount map[int]*routeConflictBucket[T]
-	catchAll       routeConflictBucket[T]
-}
-
-type routeConflictBucket[T any] struct {
-	all      []*routeEntry[T]
-	static   map[string][]*routeEntry[T]
-	wildcard []*routeEntry[T]
+	index conflictindex.Index[*routeEntry[T]]
 }
 
 type segmentNode[T any] struct {
