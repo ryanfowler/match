@@ -91,6 +91,24 @@ func (p *Params) Append(key, val string) {
 	p.len = len(heap)
 }
 
+func (p *Params) truncate(n int) {
+	if n < 0 || n > p.len {
+		panic("match: parameter length out of range")
+	}
+	p.len = n
+	if p.heap != nil {
+		p.heap = p.heap[:n]
+	}
+}
+
+func (p *Params) setKey(i int, key string) {
+	if p.heap != nil {
+		p.heap[i].Key = key
+		return
+	}
+	p.inline[i].Key = key
+}
+
 // Merge returns a Params value containing a followed by b.
 //
 // Parameter keys are not deduplicated; when the same key appears in both

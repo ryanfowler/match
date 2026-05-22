@@ -332,6 +332,64 @@ func TestExactStaticMapTracksLiteralRoutes(t *testing.T) {
 	}
 }
 
+func TestSimpleDynamicRoutesPopulateFastRadix(t *testing.T) {
+	var router Router[string]
+	router.Insert("/users/{id}", "user")
+	router.Insert("/assets/{*path}", "asset")
+
+	if router.root.hasComplexParams {
+		t.Fatal("simple dynamic routes marked router complex")
+	}
+	if !router.root.hasSimpleDynamic {
+		t.Fatal("simple dynamic routes did not populate fast radix")
+	}
+
+	got, params, ok := router.Match("/assets/css/app.css")
+	if !ok {
+		t.Fatal("match fast catch-all route: not found")
+	}
+	if got != "asset" {
+		t.Fatalf("value = %q, want asset", got)
+	}
+	if !paramsEqual(params, ParamsOf(Param{"path", "css/app.css"})) {
+		t.Fatalf("params = %#v, want path=css/app.css", params.All())
+	}
+}
+
+func TestAffixedParamsUseGenericDynamicFallback(t *testing.T) {
+	var router Router[string]
+	router.Insert("/fixed", "fixed")
+	router.Insert("/users/{id}", "user")
+	router.Insert("/files/{name}.json", "json")
+
+	if !router.root.hasComplexParams {
+		t.Fatal("affixed parameter did not mark router complex")
+	}
+
+	got, params, ok := router.Match("/files/report.json")
+	if !ok {
+		t.Fatal("match affixed parameter route: not found")
+	}
+	if got != "json" {
+		t.Fatalf("value = %q, want json", got)
+	}
+	if !paramsEqual(params, ParamsOf(Param{"name", "report"})) {
+		t.Fatalf("params = %#v, want name=report", params.All())
+	}
+
+	buf := ParamsOf(Param{"stale", "value"})
+	got, ok = router.MatchInto("/fixed", &buf)
+	if !ok {
+		t.Fatal("MatchInto exact static route: not found")
+	}
+	if got != "fixed" {
+		t.Fatalf("MatchInto value = %q, want fixed", got)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("MatchInto exact static params length = %d, want 0", buf.Len())
+	}
+}
+
 func TestMatchRootCatchAllFallbackWithAbsoluteRoutes(t *testing.T) {
 	var router Router[string]
 	router.Insert("{*path}", "catch-all")

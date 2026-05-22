@@ -69,6 +69,10 @@ type node[T any] struct {
 	routes                []*routeEntry[T]
 	exactStatic           map[string]*routeEntry[T]
 	maxExactStaticPathLen int
+	fastRoot              simpleRadixNode[T]
+	hasComplexParams      bool
+	hasSimpleDynamic      bool
+	maxSimpleCaptureCount int
 	normalized            map[string]string
 	conflictIndex         routeConflictIndex[T]
 	root                  segmentNode[T]
@@ -117,6 +121,10 @@ func (n *node[T]) clone() node[T] {
 	cloned.routes = cloneRouteEntries(n.routes, entries)
 	cloned.exactStatic = cloneExactStatic(n.exactStatic, entries)
 	cloned.maxExactStaticPathLen = n.maxExactStaticPathLen
+	cloned.fastRoot = n.fastRoot.clone(entries)
+	cloned.hasComplexParams = n.hasComplexParams
+	cloned.hasSimpleDynamic = n.hasSimpleDynamic
+	cloned.maxSimpleCaptureCount = n.maxSimpleCaptureCount
 	cloned.normalized = maps.Clone(n.normalized)
 
 	for _, entry := range cloned.routes {
@@ -248,6 +256,7 @@ func (n *node[T]) insertLiteral(route string, value T) error {
 	n.normalized[normalized] = entry.route
 	n.routes = append(n.routes, entry)
 	n.addExactStatic(entry)
+	n.addFastRoute(entry)
 	n.conflictIndex.add(entry)
 	n.insertTree(entry)
 	n.refreshRootPrefix(entry)
@@ -293,6 +302,7 @@ func (n *node[T]) insertDynamic(route string, value T) error {
 	n.normalized[normalized] = entry.route
 	n.routes = append(n.routes, entry)
 	n.addExactStatic(entry)
+	n.addFastRoute(entry)
 	n.conflictIndex.add(entry)
 	n.insertTree(entry)
 	n.refreshRootPrefix(entry)
@@ -309,6 +319,21 @@ func (n *node[T]) addExactStatic(entry *routeEntry[T]) {
 	n.exactStatic[entry.route] = entry
 	if len(entry.route) > n.maxExactStaticPathLen {
 		n.maxExactStaticPathLen = len(entry.route)
+	}
+}
+
+func (n *node[T]) addFastRoute(entry *routeEntry[T]) {
+	if !simpleRoute(entry) {
+		n.hasComplexParams = true
+		return
+	}
+	if entry.captureCount == 0 {
+		return
+	}
+	n.hasSimpleDynamic = true
+	n.fastRoot.insert(entry)
+	if entry.captureCount > n.maxSimpleCaptureCount {
+		n.maxSimpleCaptureCount = entry.captureCount
 	}
 }
 
@@ -413,6 +438,22 @@ func (n *node[T]) match(route string) (T, Params, bool) {
 	if entry, ok := n.matchExactStatic(route); ok {
 		return entry.value, Params{}, true
 	}
+	if !n.hasComplexParams {
+		if !n.hasSimpleDynamic {
+			var val T
+			return val, Params{}, false
+		}
+		var params Params
+		if n.maxSimpleCaptureCount > inlineParams {
+			params.Grow(n.maxSimpleCaptureCount)
+		}
+		if entry, ok := n.fastRoot.match(route, 0, &params); ok {
+			applySimpleParamNames(entry, &params)
+			return entry.value, params, true
+		}
+		var val T
+		return val, Params{}, false
+	}
 	root, index, _ := n.matchRoot(route)
 	entry, ok := root.matchPath(route, index)
 	if !ok {
@@ -426,6 +467,25 @@ func (n *node[T]) match(route string) (T, Params, bool) {
 
 func (n *node[T]) matchInto(route string, params *Params) (T, bool) {
 	params.Reset()
+	if entry, ok := n.matchExactStatic(route); ok {
+		return entry.value, true
+	}
+	if !n.hasComplexParams {
+		if !n.hasSimpleDynamic {
+			var val T
+			return val, false
+		}
+		if n.maxSimpleCaptureCount > inlineParams {
+			params.Grow(n.maxSimpleCaptureCount)
+		}
+		if entry, ok := n.fastRoot.match(route, 0, params); ok {
+			applySimpleParamNames(entry, params)
+			return entry.value, true
+		}
+		params.Reset()
+		var val T
+		return val, false
+	}
 	root, index, _ := n.matchRoot(route)
 	entry, ok := root.matchPath(route, index)
 	if !ok {

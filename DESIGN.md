@@ -21,10 +21,12 @@ route pattern + value -> match path -> value + Params + ok
 That narrow scope drives most of the architecture:
 
 - Route parsing and validation happen once during insertion.
-- Matching uses a compact segment trie.
+- Matching uses an exact static map, a compressed radix fast path for simple
+  dynamic routes, and a generic segment trie for complex patterns.
 - Ambiguous routes are rejected before they can make runtime matching depend on
   insertion order.
-- Captured parameters are collected only after the winning route is known.
+- Captured parameters are either collected after the winning route is known, or
+  gathered during the simple radix walk with rollback on failed branches.
 - Parameter storage avoids heap allocation for the common case.
 
 The package has no third-party dependencies. It requires Go 1.23, primarily
@@ -36,7 +38,8 @@ because `Params.Seq` exposes an `iter.Seq2`.
 | --- | --- |
 | `doc.go` | Package-level documentation and public behavior summary. |
 | `match.go` | Public `Router[T]` and `PrefixMatch[T]` API surface. |
-| `node.go` | Route parser, route entries, conflict detection, trie construction, exact matching, prefix matching, and low-level path helpers. |
+| `node.go` | Route parser, route entries, conflict detection, matcher selection, generic trie construction, exact matching, prefix matching, and low-level path helpers. |
+| `radix.go` | Compressed radix fast path for simple dynamic routes made from static text, whole-segment params, and trailing catch-all params. |
 | `params.go` | Public `Param` and `Params` types plus allocation-conscious parameter storage helpers. |
 | `match_test.go` | Behavioral tests for route grammar, matching, prefix matching, conflicts, and `Params`. |
 | `match_bench_test.go` | Benchmarks for insertion, exact matching, prefix matching, misses, and reusable parameter buffers. |
@@ -123,6 +126,10 @@ node[T]
   routes                []*routeEntry[T]
   exactStatic           map[string]*routeEntry[T]
   maxExactStaticPathLen int
+  fastRoot              simpleRadixNode[T]
+  hasComplexParams      bool
+  hasSimpleDynamic      bool
+  maxSimpleCaptureCount int
   normalized            map[string]string
   conflictIndex         routeConflictIndex[T]
   root                  segmentNode[T]
@@ -139,8 +146,10 @@ The main subsystems are:
   segment patterns, and normalized for duplicate detection.
 - Conflict index: dynamic routes are indexed so ambiguous definitions can be
   rejected at insertion time without comparing every route in common cases.
-- Segment trie: the matcher walks static, parameter, and catch-all edges in a
-  deterministic specificity order.
+- Fast radix tree: exact matching for routers whose dynamic routes contain only
+  static text, whole-segment params, and trailing catch-all params.
+- Segment trie: the fallback matcher walks static, parameter, affixed-parameter,
+  and catch-all edges in a deterministic specificity order.
 - Parameter storage: `Params` stores up to four captures inline and optionally
   grows to a heap slice.
 
@@ -153,13 +162,14 @@ TryInsert(route, value)
   -> reject duplicate normalized shape
   -> reject ambiguous conflicts
   -> add exact static routeEntry to exactStatic
-  -> insert routeEntry into trie
+  -> insert simple dynamic routeEntry into the radix fast path
+  -> insert routeEntry into generic trie
   -> add routeEntry to conflict index
 
 Match(path)
   -> check exactStatic for a full-path literal hit
-  -> choose root search node
-  -> walk trie by path segment
+  -> use compressed radix matching when no affixed params were registered
+  -> otherwise choose root search node and walk generic trie by path segment
   -> select winning routeEntry
   -> collect captures from path using routeEntry metadata
   -> return value, Params, true
@@ -447,9 +457,10 @@ paths. For example, `{*path}` can match `/other` and capture `/other`.
 ```text
 node.match(path)
   -> entry := exactStatic[path] if path is not longer than any exact static route
-  -> root, index := matchRoot(path)
-  -> entry := root.matchPath(path, index)
-  -> collect params if entry found
+  -> entry := fastRoot.match(path) if the route table has no affixed params
+  -> otherwise root, index := matchRoot(path)
+  -> otherwise entry := root.matchPath(path, index)
+  -> collect params if entry found by the generic matcher
 ```
 
 The exact static map contains routes with no params or catch-all. A full-path
@@ -457,6 +468,12 @@ literal hit can return immediately because exact static routes are always more
 specific than dynamic routes. `maxExactStaticPathLen` avoids hashing paths that
 cannot be exact static matches because they are longer than every exact static
 route.
+
+The compressed radix fast path stores simple dynamic routes only: literal path
+text, whole-segment params such as `{id}`, and trailing catch-all params such as
+`{*path}`. If any affixed param route such as `/files/{name}.json` is
+registered, exact static routes still use `exactStatic`, but dynamic matching
+falls back to the generic segment trie.
 
 `segmentNode.matchPath` is recursive:
 
@@ -718,6 +735,7 @@ Insertion mutates:
 
 - `node.routes`
 - `node.exactStatic` and `node.maxExactStaticPathLen`
+- `node.fastRoot` and its fast-path flags
 - `node.normalized`
 - `node.conflictIndex`
 - `node.root` and descendants
