@@ -21,6 +21,17 @@ func parsePattern(pattern string) ([]labelPattern, []captureMeta, string, error)
 		return nil, nil, "", ErrInvalidHostname
 	}
 
+	if !containsBrace(canonicalPattern) {
+		if len(canonicalPattern) > maxHostnameLen {
+			return nil, nil, "", ErrInvalidHostname
+		}
+		labels, err := literalLabelPatterns(canonicalPattern)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		return labels, nil, canonicalPattern, nil
+	}
+
 	tokens, err := parsePatternTokens(canonicalPattern)
 	if err != nil {
 		return nil, nil, "", err
@@ -53,6 +64,32 @@ func parsePattern(pattern string) ([]labelPattern, []captureMeta, string, error)
 	}
 
 	return labels, captures, unescapeBraces(canonicalPattern), nil
+}
+
+func containsBrace(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] == '{' || s[i] == '}' {
+			return true
+		}
+	}
+	return false
+}
+
+func literalLabelPatterns(pattern string) ([]labelPattern, error) {
+	labels := make([]labelPattern, 0, strings.Count(pattern, ".")+1)
+	start := 0
+	for i := 0; i <= len(pattern); i++ {
+		if i < len(pattern) && pattern[i] != '.' {
+			continue
+		}
+		if i == start || i-start > maxLabelLen {
+			return nil, ErrInvalidHostname
+		}
+		label := lowerASCII(pattern[start:i])
+		labels = append(labels, labelPattern{raw: label, literal: true})
+		start = i + 1
+	}
+	return labels, nil
 }
 
 func parsePatternTokens(pattern string) ([]token, error) {

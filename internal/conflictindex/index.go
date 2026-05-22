@@ -14,6 +14,46 @@ type Bucket[E any] struct {
 	Wildcard []E
 }
 
+// Clone returns a copy of i with each stored entry replaced by translate(entry).
+func (i Index[E]) Clone(translate func(E) E) Index[E] {
+	var cloned Index[E]
+	if len(i.ByCount) != 0 {
+		cloned.ByCount = make(map[int]*Bucket[E], len(i.ByCount))
+		for count, bucket := range i.ByCount {
+			clonedBucket := bucket.Clone(translate)
+			cloned.ByCount[count] = &clonedBucket
+		}
+	}
+	cloned.CatchAll = i.CatchAll.Clone(translate)
+	return cloned
+}
+
+// Clone returns a copy of b with each stored entry replaced by translate(entry).
+func (b Bucket[E]) Clone(translate func(E) E) Bucket[E] {
+	cloned := Bucket[E]{
+		All:      cloneEntries(b.All, translate),
+		Wildcard: cloneEntries(b.Wildcard, translate),
+	}
+	if len(b.Static) != 0 {
+		cloned.Static = make(map[string][]E, len(b.Static))
+		for key, entries := range b.Static {
+			cloned.Static[key] = cloneEntries(entries, translate)
+		}
+	}
+	return cloned
+}
+
+func cloneEntries[E any](entries []E, translate func(E) E) []E {
+	if len(entries) == 0 {
+		return nil
+	}
+	cloned := make([]E, len(entries))
+	for i := range entries {
+		cloned[i] = translate(entries[i])
+	}
+	return cloned
+}
+
 // Add stores entry in the count bucket and, when hasCatchAll is true, in the
 // catch-all bucket.
 func (i *Index[E]) Add(count int, staticKey string, hasStaticKey, hasCatchAll bool, entry E) {

@@ -71,10 +71,13 @@ type captureMeta struct {
 }
 
 type node[T any] struct {
-	routes        []*routeEntry[T]
-	normalized    map[string]string
-	conflictIndex routeConflictIndex[T]
-	root          labelNode[T]
+	routes                []*routeEntry[T]
+	exactStatic           map[string]*routeEntry[T]
+	maxExactStaticHostLen int
+	hasDynamic            bool
+	normalized            map[string]string
+	conflictIndex         routeConflictIndex[T]
+	root                  labelNode[T]
 }
 
 type routeConflictIndex[T any] struct {

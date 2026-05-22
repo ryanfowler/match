@@ -9,17 +9,15 @@ func (n *node[T]) clone() node[T] {
 	var cloned node[T]
 	entries := make(map[*routeEntry[T]]*routeEntry[T], len(n.routes))
 	cloned.routes = cloneRouteEntries(n.routes, entries)
-	cloned.exactStatic = cloneExactStatic(n.exactStatic, entries)
+	cloned.exactStatic = cloneExactStatic(n.exactStatic, cloned.routes)
 	cloned.maxExactStaticPathLen = n.maxExactStaticPathLen
 	cloned.fastRoot = n.fastRoot.clone(entries)
 	cloned.hasComplexParams = n.hasComplexParams
 	cloned.hasSimpleDynamic = n.hasSimpleDynamic
+	cloned.hasDynamic = n.hasDynamic
 	cloned.maxSimpleCaptureCount = n.maxSimpleCaptureCount
 	cloned.normalized = maps.Clone(n.normalized)
-
-	for _, entry := range cloned.routes {
-		cloned.conflictIndex.add(entry)
-	}
+	cloned.conflictIndex = n.conflictIndex.clone(cloned.routes)
 
 	nodes := make(map[*segmentNode[T]]*segmentNode[T])
 	cloneSegmentNodeInto(&n.root, &cloned.root, entries, nodes)
@@ -33,14 +31,14 @@ func (n *node[T]) clone() node[T] {
 	return cloned
 }
 
-func cloneExactStatic[T any](exactStatic map[string]*routeEntry[T], entries map[*routeEntry[T]]*routeEntry[T]) map[string]*routeEntry[T] {
+func cloneExactStatic[T any](exactStatic map[string]*routeEntry[T], routes []*routeEntry[T]) map[string]*routeEntry[T] {
 	if len(exactStatic) == 0 {
 		return nil
 	}
 
 	cloned := make(map[string]*routeEntry[T], len(exactStatic))
 	for path, entry := range exactStatic {
-		cloned[path] = entries[entry]
+		cloned[path] = routes[entry.order]
 	}
 	return cloned
 }

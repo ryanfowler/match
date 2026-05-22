@@ -13,6 +13,14 @@ func (i *routeConflictIndex[T]) add(entry *routeEntry[T]) {
 	i.index.Add(entry.segmentCount, entry.firstStaticSegment, entry.hasFirstStaticSegment, entry.hasCatchAll, entry)
 }
 
+func (i routeConflictIndex[T]) clone(routes []*routeEntry[T]) routeConflictIndex[T] {
+	return routeConflictIndex[T]{
+		index: i.index.Clone(func(entry *routeEntry[T]) *routeEntry[T] {
+			return routes[entry.order]
+		}),
+	}
+}
+
 func (i *routeConflictIndex[T]) findConflict(entry *routeEntry[T]) *routeEntry[T] {
 	var best *routeEntry[T]
 	if bucket := i.index.ByCount[entry.segmentCount]; bucket != nil {

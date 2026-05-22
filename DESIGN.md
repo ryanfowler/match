@@ -87,10 +87,13 @@ dns.Router[T]
   root node[T]
 
 dns.node[T]
-  routes         []*routeEntry[T]
-  conflictRoutes []*routeEntry[T]
-  normalized     map[string]string
-  root           labelNode[T]
+  routes                []*routeEntry[T]
+  exactStatic           map[string]*routeEntry[T]
+  maxExactStaticHostLen int
+  hasDynamic            bool
+  normalized            map[string]string
+  conflictIndex         routeConflictIndex[T]
+  root                  labelNode[T]
 
 labelNode[T]
   static          []staticEdge[T]
@@ -107,12 +110,13 @@ is already lowercase, indexed static lookup can use the label directly. Larger
 static fanouts also keep a folded fixed-size label index so uppercase lookups
 remain indexed without allocating a lowercased string.
 
-Insertion uses normalized pattern shapes to reject duplicates independent of
-parameter names and literal case. It also rejects ambiguous dynamic overlaps,
-including catch-all patterns that overlap other capturing patterns. Static
-hostnames may live under broader dynamic or catch-all patterns because literal
-edges deterministically win at match time, so only capturing routes are kept in
-the ambiguity-check list.
+Insertion uses an exact-static map for literal hostname duplicates and
+normalized pattern shapes for dynamic duplicates independent of parameter names
+and literal case. It also rejects ambiguous dynamic overlaps, including
+catch-all patterns that overlap other capturing patterns. Static hostnames may
+live under broader dynamic or catch-all patterns because literal edges
+deterministically win at match time, so only capturing routes are kept in the
+ambiguity-check list.
 
 ## High-Level Components
 
@@ -129,6 +133,7 @@ node[T]
   fastRoot              simpleRadixNode[T]
   hasComplexParams      bool
   hasSimpleDynamic      bool
+  hasDynamic            bool
   maxSimpleCaptureCount int
   normalized            map[string]string
   conflictIndex         routeConflictIndex[T]
@@ -159,7 +164,7 @@ The normal lifecycle is:
 TryInsert(route, value)
   -> parse route if it contains braces
   -> build routeEntry
-  -> reject duplicate normalized shape
+  -> reject duplicate exact-static route or normalized dynamic shape
   -> reject ambiguous conflicts
   -> add exact static routeEntry to exactStatic
   -> insert simple dynamic routeEntry into the radix fast path
@@ -355,9 +360,10 @@ P<ordinal>;
 C<ordinal>;
 ```
 
-Literal-only routes registered through the literal fast path are prefixed with
-`S` by `normalizedStaticLiteral`. This prevents a static route string from
-colliding with a dynamic route's normalized encoding.
+Literal-only routes registered through the literal fast path use `exactStatic`
+for duplicate detection and matching, so they do not need normalized-shape
+entries. Routes that contain brace syntax still use the normalized encoding,
+including escaped-brace literal routes.
 
 After tokenization, `splitTokenSegments` splits tokens on literal `/` bytes. It
 preserves empty segments, so absolute paths, trailing slashes, and repeated
@@ -371,10 +377,9 @@ process:
 
 ```text
 build entry
-  -> initialize normalized map if needed
-  -> reject duplicate normalized shape
+  -> reject duplicate exact-static route or normalized dynamic shape
   -> find ambiguous conflict if needed
-  -> store normalized shape
+  -> store exact-static or normalized-dynamic index entry
   -> append to node.routes
   -> cache exact static routes
   -> add to conflict index
@@ -741,6 +746,7 @@ Insertion mutates:
 - `node.routes`
 - `node.exactStatic` and `node.maxExactStaticPathLen`
 - `node.fastRoot` and its fast-path flags
+- `node.hasDynamic`
 - `node.normalized`
 - `node.conflictIndex`
 - `node.root` and descendants
@@ -844,7 +850,7 @@ When changing `Params`, preserve these public expectations:
 
 When changing insertion, preserve these invariants:
 
-- Duplicate normalized shapes are rejected.
+- Duplicate exact-static routes and normalized dynamic shapes are rejected.
 - Ambiguous dynamic overlaps are rejected.
 - Static routes may coexist with broader dynamic routes when precedence is
   deterministic.

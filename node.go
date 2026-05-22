@@ -66,6 +66,7 @@ type node[T any] struct {
 	fastRoot              simpleRadixNode[T]
 	hasComplexParams      bool
 	hasSimpleDynamic      bool
+	hasDynamic            bool
 	maxSimpleCaptureCount int
 	normalized            map[string]string
 	conflictIndex         routeConflictIndex[T]

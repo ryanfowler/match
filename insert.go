@@ -23,11 +23,10 @@ func (n *node[T]) insertLiteral(route string, value T) error {
 		hasFirstStaticSegment: hasFirstStaticSegment,
 		value:                 value,
 	}
-	normalized := normalizedStaticLiteral(route)
 	catchAllStaticConflict := n.root.conflictsWithCatchAllStaticPatterns(patterns, 0)
 	needsConflictCheck := len(entry.captures) != 0 || catchAllStaticConflict
 
-	return n.finishInsert(entry, normalized, needsConflictCheck)
+	return n.finishStaticInsert(entry, needsConflictCheck)
 }
 
 func (n *node[T]) insertDynamic(route string, value T) error {
@@ -53,6 +52,26 @@ func (n *node[T]) insertDynamic(route string, value T) error {
 	needsConflictCheck := len(entry.captures) != 0 || n.root.conflictsWithCatchAllStatic(segments, 0)
 
 	return n.finishInsert(entry, normalized, needsConflictCheck)
+}
+
+func (n *node[T]) finishStaticInsert(entry *routeEntry[T], needsConflictCheck bool) error {
+	if existing := n.exactStatic[entry.route]; existing != nil {
+		return &ConflictError{Route: entry.route, With: existing.route}
+	}
+
+	if needsConflictCheck {
+		if existing := n.conflictIndex.findConflict(entry); existing != nil {
+			return &ConflictError{Route: entry.route, With: existing.route}
+		}
+	}
+
+	n.routes = append(n.routes, entry)
+	n.addExactStatic(entry)
+	n.addFastRoute(entry)
+	n.conflictIndex.add(entry)
+	n.insertTree(entry)
+	n.refreshRootPrefix(entry)
+	return nil
 }
 
 func (n *node[T]) finishInsert(entry *routeEntry[T], normalized string, needsConflictCheck bool) error {
@@ -95,21 +114,19 @@ func (n *node[T]) addExactStatic(entry *routeEntry[T]) {
 func (n *node[T]) addFastRoute(entry *routeEntry[T]) {
 	if !simpleRoute(entry) {
 		n.hasComplexParams = true
+		n.hasDynamic = true
 		return
 	}
 	capturesLen := len(entry.captures)
 	if capturesLen == 0 {
 		return
 	}
+	n.hasDynamic = true
 	n.hasSimpleDynamic = true
 	n.fastRoot.insert(entry)
 	if capturesLen > n.maxSimpleCaptureCount {
 		n.maxSimpleCaptureCount = capturesLen
 	}
-}
-
-func normalizedStaticLiteral(route string) string {
-	return "S" + route
 }
 
 func (n *node[T]) refreshRootPrefix(entry *routeEntry[T]) {
