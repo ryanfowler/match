@@ -842,31 +842,62 @@ func TestMatchitManyParameters(t *testing.T) {
 	}
 }
 
-func TestMatchPreallocatesHeapParams(t *testing.T) {
-	const paramCount = 9
-	route := makeParamRoute("p", paramCount)
-	path := makePath("v", paramCount)
+func TestMatchDoesNotPreallocateHeapParamsFromRouteTableMax(t *testing.T) {
+	const matchedParamCount = inlineParamCapacity
+	const largestParamCount = inlineParamCapacity + 1
+	matchedRoute := makeParamRoute("p", matchedParamCount)
+	matchedPath := makePath("v", matchedParamCount)
 
 	var router Router[string]
-	if err := router.TryInsert(route, "many"); err != nil {
-		t.Fatalf("insert many-param route: %v", err)
+	if err := router.TryInsert(makeParamRoute("wide", largestParamCount), "wide"); err != nil {
+		t.Fatalf("insert widest-param route: %v", err)
+	}
+	if err := router.TryInsert(matchedRoute, "inline"); err != nil {
+		t.Fatalf("insert inline-param route: %v", err)
 	}
 
-	allocs := testing.AllocsPerRun(100, func() {
-		_, params, ok := router.Match(path)
-		if !ok {
-			t.Fatal("Match did not match")
-		}
-		if params.Len() != paramCount {
-			t.Fatalf("params length = %d, want %d", params.Len(), paramCount)
-		}
-		if params.heap == nil || cap(params.heap) < paramCount {
-			t.Fatalf("params heap capacity = %d, want at least %d", cap(params.heap), paramCount)
+	t.Run("Match", func(t *testing.T) {
+		allocs := testing.AllocsPerRun(100, func() {
+			got, params, ok := router.Match(matchedPath)
+			if !ok {
+				t.Fatal("Match did not match")
+			}
+			if got != "inline" {
+				t.Fatalf("value = %q, want inline", got)
+			}
+			if params.Len() != matchedParamCount {
+				t.Fatalf("params length = %d, want %d", params.Len(), matchedParamCount)
+			}
+			if params.heap != nil {
+				t.Fatalf("params heap capacity = %d, want inline storage", cap(params.heap))
+			}
+		})
+		if allocs != 0 {
+			t.Fatalf("allocs per Match = %v, want 0", allocs)
 		}
 	})
-	if allocs != 1 {
-		t.Fatalf("allocs per Match = %v, want 1", allocs)
-	}
+
+	t.Run("MatchInto", func(t *testing.T) {
+		allocs := testing.AllocsPerRun(100, func() {
+			var params Params
+			got, ok := router.MatchInto(matchedPath, &params)
+			if !ok {
+				t.Fatal("MatchInto did not match")
+			}
+			if got != "inline" {
+				t.Fatalf("value = %q, want inline", got)
+			}
+			if params.Len() != matchedParamCount {
+				t.Fatalf("params length = %d, want %d", params.Len(), matchedParamCount)
+			}
+			if params.heap != nil {
+				t.Fatalf("params heap capacity = %d, want inline storage", cap(params.heap))
+			}
+		})
+		if allocs != 0 {
+			t.Fatalf("allocs per MatchInto = %v, want 0", allocs)
+		}
+	})
 }
 
 func TestMatchitHighParameterOrdinalDoesNotCollideWithLiteral(t *testing.T) {
