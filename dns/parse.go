@@ -5,53 +5,44 @@ import (
 	"strings"
 )
 
-func parsePattern(pattern string) ([]labelPattern, []string, int, int, string, error) {
+func parsePattern(pattern string) ([]labelPattern, []captureMeta, string, error) {
 	canonicalPattern := trimRootDot(pattern)
 	if canonicalPattern == "" {
-		return nil, nil, 0, 0, "", ErrInvalidHostname
+		return nil, nil, "", ErrInvalidHostname
 	}
 
 	tokens, err := parsePatternTokens(canonicalPattern)
 	if err != nil {
-		return nil, nil, 0, 0, "", err
+		return nil, nil, "", err
 	}
 
 	labelTokens := splitTokenLabels(tokens)
 	labels := make([]labelPattern, len(labelTokens))
-	var captureNames []string
-	singleCaptureLabel := -1
-	captureCount := 0
+	var captures []captureMeta
 
 	for i := range labelTokens {
 		if len(labelTokens[i]) == 0 {
-			return nil, nil, 0, 0, "", ErrInvalidHostname
+			return nil, nil, "", ErrInvalidHostname
 		}
 
 		var capture string
 		labels[i], capture = makeLabel(labelTokens[i])
 		if err := validateLabelPattern(labels[i]); err != nil {
-			return nil, nil, 0, 0, "", err
+			return nil, nil, "", err
 		}
 		if labels[i].catchAll && i != 0 {
-			return nil, nil, 0, 0, "", ErrInvalidCatchAll
+			return nil, nil, "", ErrInvalidCatchAll
 		}
 		if capture != "" {
-			if captureNames == nil {
-				captureNames = make([]string, len(labelTokens))
-			}
-			captureNames[i] = capture
-			if captureCount == 0 {
-				singleCaptureLabel = i
-			}
-			captureCount++
+			captures = append(captures, captureMeta{index: uint32(i), name: capture})
 		}
 	}
 
 	if minHostnameLength(labels) > maxHostnameLen {
-		return nil, nil, 0, 0, "", ErrInvalidHostname
+		return nil, nil, "", ErrInvalidHostname
 	}
 
-	return labels, captureNames, singleCaptureLabel, captureCount, unescapeBraces(canonicalPattern), nil
+	return labels, captures, unescapeBraces(canonicalPattern), nil
 }
 
 func parsePatternTokens(pattern string) ([]token, error) {
