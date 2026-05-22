@@ -196,8 +196,8 @@ func staticSegmentRaw(segment []token) (string, bool) {
 	if len(segment) == 0 {
 		return "", true
 	}
-	if len(segment) == 1 && segment[0].kind == tokenLiteral {
-		return segment[0].text, true
+	if len(segment) == 1 && segment[0].Kind == tokenLiteral {
+		return segment[0].Text, true
 	}
 	return "", false
 }
