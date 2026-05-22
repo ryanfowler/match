@@ -78,7 +78,7 @@ func collectParams[T any](entry *routeEntry[T], path string, params *Params) {
 		return
 	}
 
-	if len(captures) > inlineParams {
+	if len(captures) > inlineParamCapacity {
 		params.Grow(len(captures))
 	}
 

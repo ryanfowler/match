@@ -11,7 +11,11 @@ type Param struct {
 	Val string
 }
 
-const inlineParams = 4
+const (
+	// inlineParamCapacity is the number of captures stored directly inside
+	// Params before it switches to heap-backed storage.
+	inlineParamCapacity = 4
+)
 
 // Params stores captured route parameters in route order.
 //
@@ -20,7 +24,7 @@ const inlineParams = 4
 // when a []Param snapshot is needed. Up to four captures are stored inline.
 type Params struct {
 	len    int
-	inline [inlineParams]Param
+	inline [inlineParamCapacity]Param
 	heap   []Param
 }
 
@@ -30,7 +34,7 @@ type Params struct {
 // across matches. Capacity values of four or less use the inline storage built
 // into Params.
 func NewParams(capacity int) Params {
-	if capacity <= inlineParams {
+	if capacity <= inlineParamCapacity {
 		return Params{}
 	}
 	return Params{heap: make([]Param, 0, capacity)}

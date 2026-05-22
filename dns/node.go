@@ -9,9 +9,16 @@ import (
 )
 
 const (
-	maxHostnameLen      = 253
-	maxLabelLen         = 63
+	maxHostnameLen = 253
+	maxLabelLen    = 63
+
+	// inlineParamCapacity mirrors match.Params inline storage capacity so DNS
+	// can pre-grow only when a pattern exceeds the inline capture buffer.
 	inlineParamCapacity = 4
+
+	// staticChildMapThreshold is the static-label fanout where a trie node
+	// builds exact and folded lookup maps instead of relying only on slices.
+	staticChildMapThreshold = 9
 )
 
 var (

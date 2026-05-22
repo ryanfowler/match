@@ -416,9 +416,10 @@ Each node can have:
 - Catch-all edges that terminate matching by consuming the remaining path.
 - An optional route value when a route ends at that node.
 
-Static edges are stored as a small slice first. When a node reaches nine static
-children, `addStaticChild` builds `staticIndex` for O(1)-style lookup while
-keeping the compact slice representation for small route tables.
+Static edges are stored as a small slice first. When a node reaches
+`staticChildMapThreshold` static children, `addStaticChild` builds
+`staticIndex` for O(1)-style lookup while keeping the compact slice
+representation for small route tables.
 
 Parameter edges are stored as segment patterns and sorted by segment-level
 specificity:
@@ -673,13 +674,13 @@ Capture extraction uses the same helpers as matching:
 ```go
 type Params struct {
 	len    int
-	inline [inlineParams]Param
+	inline [inlineParamCapacity]Param
 	heap   []Param
 }
 ```
 
-`inlineParams` is four. Up to four captures are stored directly in the `Params`
-value, avoiding heap allocation for common route shapes.
+`inlineParamCapacity` is four. Up to four captures are stored directly in the
+`Params` value, avoiding heap allocation for common route shapes.
 
 When more than four captures are needed, `Params` switches to `heap` storage.
 The heap slice is kept inside the value so callers can pass a pointer to it into
@@ -758,8 +759,8 @@ The implementation is tuned around common routing workloads:
 - Exact static matches can return from a full-path map lookup before walking the
   trie.
 - Matching walks by path segment instead of scanning all routes.
-- Static edges stay slice-backed for small fanout and gain a map after the
-  ninth static child.
+- Static edges stay slice-backed for small fanout and gain a map at
+  `staticChildMapThreshold`.
 - Parameter edges are ordered by specificity to find likely winners early.
 - Captures are collected after route selection to keep branch exploration cheap.
 - Up to four captures are inline in `Params`.
