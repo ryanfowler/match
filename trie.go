@@ -142,7 +142,7 @@ func (n *segmentNode[T]) staticChild(segment string) *segmentNode[T] {
 
 func (n *segmentNode[T]) addStaticChild(segment string, child *segmentNode[T]) {
 	n.static = append(n.static, staticEdge[T]{segment: segment, child: child})
-	if len(n.static) == 9 {
+	if len(n.static) == staticChildMapThreshold {
 		n.staticIndex = make(map[string]*segmentNode[T], len(n.static))
 		for i := range n.static {
 			n.staticIndex[n.static[i].segment] = n.static[i].child

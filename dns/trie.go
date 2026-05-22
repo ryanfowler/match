@@ -135,7 +135,7 @@ func (n *labelNode[T]) staticChild(label string) *labelNode[T] {
 
 func (n *labelNode[T]) addStaticChild(label string, child *labelNode[T]) {
 	n.static = append(n.static, staticEdge[T]{label: label, child: child})
-	if len(n.static) == 9 {
+	if len(n.static) == staticChildMapThreshold {
 		n.staticIndex = make(map[string]*labelNode[T], len(n.static))
 		n.staticFoldIndex = make(map[foldedLabelKey]*labelNode[T], len(n.static))
 		for i := range n.static {

@@ -7,6 +7,12 @@ import (
 	"github.com/ryanfowler/match/internal/conflictindex"
 )
 
+const (
+	// staticChildMapThreshold is the static-segment fanout where a trie node
+	// builds a lookup map instead of relying only on the compact edge slice.
+	staticChildMapThreshold = 9
+)
+
 var (
 	// ErrInvalidParamSegment reports a route segment that contains more than
 	// one parameter.
