@@ -475,6 +475,11 @@ text, whole-segment params such as `{id}`, and trailing catch-all params such as
 registered, exact static routes still use `exactStatic`, but dynamic matching
 falls back to the generic segment trie.
 
+The radix matcher is iterative. It walks compressed static labels and whole
+segment parameter edges in a loop, keeping a small explicit backtracking stack
+only when a static branch must be tried before a dynamic fallback. This keeps
+the common simple-dynamic path out of recursive per-node calls.
+
 `segmentNode.matchPath` is recursive:
 
 1. If there are no remaining segments, return the node's value if present.

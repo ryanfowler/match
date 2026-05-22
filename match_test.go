@@ -356,6 +356,46 @@ func TestSimpleDynamicRoutesPopulateFastRadix(t *testing.T) {
 	}
 }
 
+func TestFastRadixBacktracksFromStaticToParam(t *testing.T) {
+	for _, routes := range [][]string{
+		{"/{kind}/bar", "/foo/{id}/baz"},
+		{"/foo/{id}/baz", "/{kind}/bar"},
+	} {
+		t.Run(strings.Join(routes, ","), func(t *testing.T) {
+			var router Router[string]
+			for _, route := range routes {
+				router.Insert(route, route)
+			}
+
+			if router.root.hasComplexParams {
+				t.Fatal("simple dynamic routes marked router complex")
+			}
+
+			got, params, ok := router.Match("/foo/bar")
+			if !ok {
+				t.Fatal("match param fallback route: not found")
+			}
+			if got != "/{kind}/bar" {
+				t.Fatalf("value = %q, want /{kind}/bar", got)
+			}
+			if !paramsEqual(params, ParamsOf(Param{"kind", "foo"})) {
+				t.Fatalf("params = %#v, want kind=foo", params.All())
+			}
+
+			got, params, ok = router.Match("/foo/qux/baz")
+			if !ok {
+				t.Fatal("match static-first route: not found")
+			}
+			if got != "/foo/{id}/baz" {
+				t.Fatalf("value = %q, want /foo/{id}/baz", got)
+			}
+			if !paramsEqual(params, ParamsOf(Param{"id", "qux"})) {
+				t.Fatalf("params = %#v, want id=qux", params.All())
+			}
+		})
+	}
+}
+
 func TestAffixedParamsUseGenericDynamicFallback(t *testing.T) {
 	var router Router[string]
 	router.Insert("/fixed", "fixed")
