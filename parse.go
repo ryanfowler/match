@@ -3,7 +3,17 @@ package match
 import (
 	"strconv"
 	"strings"
+
+	"github.com/ryanfowler/match/internal/patternscan"
 )
+
+var routeScanOptions = patternscan.Options{
+	Separator:           '/',
+	CatchAllRule:        patternscan.CatchAllAtEnd,
+	ErrInvalidParam:     ErrInvalidParam,
+	ErrInvalidParamPart: ErrInvalidParamSegment,
+	ErrInvalidCatchAll:  ErrInvalidCatchAll,
+}
 
 func literalSegmentPatterns(route string) []segmentPattern {
 	patterns := make([]segmentPattern, 0, strings.Count(route, "/")+1)
@@ -28,24 +38,24 @@ func splitTokenSegments(tokens []token) [][]token {
 	}
 
 	for _, t := range tokens {
-		if t.kind != tokenLiteral {
+		if t.Kind != tokenLiteral {
 			current = append(current, t)
 			continue
 		}
 
 		start := 0
-		for i := 0; i < len(t.text); i++ {
-			if t.text[i] != '/' {
+		for i := 0; i < len(t.Text); i++ {
+			if t.Text[i] != '/' {
 				continue
 			}
 			if i > start {
-				current = append(current, token{kind: tokenLiteral, text: t.text[start:i]})
+				current = append(current, token{Kind: tokenLiteral, Text: t.Text[start:i]})
 			}
 			flush()
 			start = i + 1
 		}
-		if start < len(t.text) {
-			current = append(current, token{kind: tokenLiteral, text: t.text[start:]})
+		if start < len(t.Text) {
+			current = append(current, token{Kind: tokenLiteral, Text: t.Text[start:]})
 		}
 	}
 
@@ -56,10 +66,10 @@ func splitTokenSegments(tokens []token) [][]token {
 func countTokenSegments(tokens []token) int {
 	count := 1
 	for _, t := range tokens {
-		if t.kind != tokenLiteral {
+		if t.Kind != tokenLiteral {
 			continue
 		}
-		count += strings.Count(t.text, "/")
+		count += strings.Count(t.Text, "/")
 	}
 	return count
 }
@@ -115,159 +125,40 @@ func sameSegmentPattern(a, b segmentPattern) bool {
 }
 
 func parseRoute(route string) ([]token, string, error) {
-	tokens := make([]token, 0, countRouteTokens(route))
+	tokens, err := patternscan.Scan(route, &routeScanOptions)
+	if err != nil {
+		return nil, "", err
+	}
+	return tokens, normalizedRoute(tokens, len(route)), nil
+}
+
+func normalizedRoute(tokens []token, routeLen int) string {
 	var normalized strings.Builder
-	var literal strings.Builder
-	normalized.Grow(len(route) + 8)
-	literal.Grow(len(route))
-	paramsInSegment := 0
+	normalized.Grow(routeLen + 8)
 	paramOrdinal := 0
-
-	flushLiteral := func() {
-		if literal.Len() == 0 {
-			return
-		}
-		text := literal.String()
-		tokens = append(tokens, token{kind: tokenLiteral, text: text})
-		normalized.WriteByte('L')
-		normalized.WriteString(strconv.Itoa(len(text)))
-		normalized.WriteByte(':')
-		normalized.WriteString(text)
-		literal.Reset()
-	}
-
-	for i := 0; i < len(route); {
-		switch route[i] {
-		case '/':
-			literal.WriteByte('/')
-			paramsInSegment = 0
-			i++
-		case '{':
-			if i+1 < len(route) && route[i+1] == '{' {
-				literal.WriteByte('{')
-				i += 2
-				continue
-			}
-			flushLiteral()
-			end, err := findParamEnd(route, i+1)
-			if err != nil {
-				return nil, "", err
-			}
-			name := unescapeBraces(route[i+1 : end])
-			if name == "" {
-				return nil, "", ErrInvalidParam
-			}
-			paramsInSegment++
-			if paramsInSegment > 1 {
-				return nil, "", ErrInvalidParamSegment
-			}
-			if name[0] == '*' {
-				name = name[1:]
-				if name == "" {
-					return nil, "", ErrInvalidParam
-				}
-				if end+1 != len(route) {
-					return nil, "", ErrInvalidCatchAll
-				}
-				tokens = append(tokens, token{kind: tokenCatchAll, text: name})
-				normalized.WriteByte('C')
-				normalized.WriteString(strconv.Itoa(paramOrdinal))
-				normalized.WriteByte(';')
-			} else {
-				tokens = append(tokens, token{kind: tokenParam, text: name})
-				normalized.WriteByte('P')
-				normalized.WriteString(strconv.Itoa(paramOrdinal))
-				normalized.WriteByte(';')
-				paramOrdinal++
-			}
-			i = end + 1
-		case '}':
-			if i+1 < len(route) && route[i+1] == '}' {
-				literal.WriteByte('}')
-				i += 2
-				continue
-			}
-			return nil, "", ErrInvalidParam
-		default:
-			literal.WriteByte(route[i])
-			i++
+	for _, t := range tokens {
+		switch t.Kind {
+		case tokenLiteral:
+			normalized.WriteByte('L')
+			normalized.WriteString(strconv.Itoa(len(t.Text)))
+			normalized.WriteByte(':')
+			normalized.WriteString(t.Text)
+		case tokenParam:
+			normalized.WriteByte('P')
+			normalized.WriteString(strconv.Itoa(paramOrdinal))
+			normalized.WriteByte(';')
+			paramOrdinal++
+		case tokenCatchAll:
+			normalized.WriteByte('C')
+			normalized.WriteString(strconv.Itoa(paramOrdinal))
+			normalized.WriteByte(';')
 		}
 	}
-	flushLiteral()
-
-	return tokens, normalized.String(), nil
-}
-
-func countRouteTokens(route string) int {
-	count := 1
-	for i := 0; i < len(route); i++ {
-		switch route[i] {
-		case '{':
-			if i+1 < len(route) && route[i+1] == '{' {
-				i++
-				continue
-			}
-			count += 2
-		case '}':
-			if i+1 < len(route) && route[i+1] == '}' {
-				i++
-			}
-		}
-	}
-	return count
-}
-
-func findParamEnd(route string, start int) (int, error) {
-	for i := start; i < len(route); i++ {
-		switch route[i] {
-		case '{':
-			if i+1 < len(route) && route[i+1] == '{' {
-				i++
-				continue
-			}
-			return 0, ErrInvalidParam
-		case '}':
-			if i+1 < len(route) && route[i+1] == '}' {
-				i++
-				continue
-			}
-			if i == start || route[i-1] == '*' {
-				return 0, ErrInvalidParam
-			}
-			return i, nil
-		case '/':
-			return 0, ErrInvalidParam
-		case '*':
-			if i != start {
-				return 0, ErrInvalidParam
-			}
-			if i+1 == len(route) || route[i+1] == '}' {
-				return 0, ErrInvalidParam
-			}
-			continue
-		}
-	}
-	return 0, ErrInvalidParam
+	return normalized.String()
 }
 
 func unescapeBraces(s string) string {
-	for i := 0; i < len(s); i++ {
-		if i+1 < len(s) && ((s[i] == '{' && s[i+1] == '{') || (s[i] == '}' && s[i+1] == '}')) {
-			var b strings.Builder
-			b.Grow(len(s) - 1)
-			b.WriteString(s[:i])
-			for ; i < len(s); i++ {
-				if i+1 < len(s) && ((s[i] == '{' && s[i+1] == '{') || (s[i] == '}' && s[i+1] == '}')) {
-					b.WriteByte(s[i])
-					i++
-					continue
-				}
-				b.WriteByte(s[i])
-			}
-			return b.String()
-		}
-	}
-	return s
+	return patternscan.UnescapeBraces(s)
 }
 
 type segmentPattern struct {
@@ -284,20 +175,20 @@ func makeSegment(tokens []token) (segmentPattern, string) {
 	var b strings.Builder
 	var capture string
 	for _, t := range tokens {
-		switch t.kind {
+		switch t.Kind {
 		case tokenLiteral:
-			b.WriteString(t.text)
+			b.WriteString(t.Text)
 			if !s.param && !s.catchAll {
-				s.prefix += t.text
+				s.prefix += t.Text
 			} else {
-				s.suffix += t.text
+				s.suffix += t.Text
 			}
 		case tokenParam:
 			s.param = true
-			capture = t.text
+			capture = t.Text
 		case tokenCatchAll:
 			s.catchAll = true
-			capture = t.text
+			capture = t.Text
 		}
 	}
 	s.raw = b.String()

@@ -34,19 +34,6 @@ func (e *ConflictError) Error() string {
 	return fmt.Sprintf("insertion failed due to conflict with previously registered route: %s", e.With)
 }
 
-type tokenKind uint8
-
-const (
-	tokenLiteral tokenKind = iota
-	tokenParam
-	tokenCatchAll
-)
-
-type token struct {
-	kind tokenKind
-	text string
-}
-
 type routeEntry[T any] struct {
 	route                 string
 	patterns              []segmentPattern

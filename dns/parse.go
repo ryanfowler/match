@@ -3,7 +3,17 @@ package dns
 import (
 	"strconv"
 	"strings"
+
+	"github.com/ryanfowler/match/internal/patternscan"
 )
+
+var patternScanOptions = patternscan.Options{
+	Separator:           '.',
+	CatchAllRule:        patternscan.CatchAllInFirstPart,
+	ErrInvalidParam:     ErrInvalidParam,
+	ErrInvalidParamPart: ErrInvalidParamLabel,
+	ErrInvalidCatchAll:  ErrInvalidCatchAll,
+}
 
 func parsePattern(pattern string) ([]labelPattern, []captureMeta, string, error) {
 	canonicalPattern := trimRootDot(pattern)
@@ -46,126 +56,7 @@ func parsePattern(pattern string) ([]labelPattern, []captureMeta, string, error)
 }
 
 func parsePatternTokens(pattern string) ([]token, error) {
-	tokens := make([]token, 0, countPatternTokens(pattern))
-	var literal strings.Builder
-	literal.Grow(len(pattern))
-	paramsInLabel := 0
-	labelIndex := 0
-
-	flushLiteral := func() {
-		if literal.Len() == 0 {
-			return
-		}
-		tokens = append(tokens, token{kind: tokenLiteral, text: literal.String()})
-		literal.Reset()
-	}
-
-	for i := 0; i < len(pattern); {
-		switch pattern[i] {
-		case '.':
-			literal.WriteByte('.')
-			paramsInLabel = 0
-			labelIndex++
-			i++
-		case '{':
-			if i+1 < len(pattern) && pattern[i+1] == '{' {
-				literal.WriteByte('{')
-				i += 2
-				continue
-			}
-			flushLiteral()
-			end, err := findParamEnd(pattern, i+1)
-			if err != nil {
-				return nil, err
-			}
-			name := unescapeBraces(pattern[i+1 : end])
-			if name == "" {
-				return nil, ErrInvalidParam
-			}
-			paramsInLabel++
-			if paramsInLabel > 1 {
-				return nil, ErrInvalidParamLabel
-			}
-			if name[0] == '*' {
-				name = name[1:]
-				if name == "" {
-					return nil, ErrInvalidParam
-				}
-				if labelIndex != 0 || (end+1 < len(pattern) && pattern[end+1] != '.') {
-					return nil, ErrInvalidCatchAll
-				}
-				tokens = append(tokens, token{kind: tokenCatchAll, text: name})
-			} else {
-				tokens = append(tokens, token{kind: tokenParam, text: name})
-			}
-			i = end + 1
-		case '}':
-			if i+1 < len(pattern) && pattern[i+1] == '}' {
-				literal.WriteByte('}')
-				i += 2
-				continue
-			}
-			return nil, ErrInvalidParam
-		default:
-			literal.WriteByte(pattern[i])
-			i++
-		}
-	}
-	flushLiteral()
-
-	return tokens, nil
-}
-
-func countPatternTokens(pattern string) int {
-	count := 1
-	for i := 0; i < len(pattern); i++ {
-		switch pattern[i] {
-		case '{':
-			if i+1 < len(pattern) && pattern[i+1] == '{' {
-				i++
-				continue
-			}
-			count += 2
-		case '}':
-			if i+1 < len(pattern) && pattern[i+1] == '}' {
-				i++
-			}
-		}
-	}
-	return count
-}
-
-func findParamEnd(pattern string, start int) (int, error) {
-	for i := start; i < len(pattern); i++ {
-		switch pattern[i] {
-		case '{':
-			if i+1 < len(pattern) && pattern[i+1] == '{' {
-				i++
-				continue
-			}
-			return 0, ErrInvalidParam
-		case '}':
-			if i+1 < len(pattern) && pattern[i+1] == '}' {
-				i++
-				continue
-			}
-			if i == start || pattern[i-1] == '*' {
-				return 0, ErrInvalidParam
-			}
-			return i, nil
-		case '.':
-			return 0, ErrInvalidParam
-		case '*':
-			if i != start {
-				return 0, ErrInvalidParam
-			}
-			if i+1 == len(pattern) || pattern[i+1] == '}' {
-				return 0, ErrInvalidParam
-			}
-			continue
-		}
-	}
-	return 0, ErrInvalidParam
+	return patternscan.Scan(pattern, &patternScanOptions)
 }
 
 func splitTokenLabels(tokens []token) [][]token {
@@ -178,24 +69,24 @@ func splitTokenLabels(tokens []token) [][]token {
 	}
 
 	for _, t := range tokens {
-		if t.kind != tokenLiteral {
+		if t.Kind != tokenLiteral {
 			current = append(current, t)
 			continue
 		}
 
 		start := 0
-		for i := 0; i < len(t.text); i++ {
-			if t.text[i] != '.' {
+		for i := 0; i < len(t.Text); i++ {
+			if t.Text[i] != '.' {
 				continue
 			}
 			if i > start {
-				current = append(current, token{kind: tokenLiteral, text: t.text[start:i]})
+				current = append(current, token{Kind: tokenLiteral, Text: t.Text[start:i]})
 			}
 			flush()
 			start = i + 1
 		}
-		if start < len(t.text) {
-			current = append(current, token{kind: tokenLiteral, text: t.text[start:]})
+		if start < len(t.Text) {
+			current = append(current, token{Kind: tokenLiteral, Text: t.Text[start:]})
 		}
 	}
 
@@ -206,8 +97,8 @@ func splitTokenLabels(tokens []token) [][]token {
 func countTokenLabels(tokens []token) int {
 	count := 1
 	for _, t := range tokens {
-		if t.kind == tokenLiteral {
-			count += strings.Count(t.text, ".")
+		if t.Kind == tokenLiteral {
+			count += strings.Count(t.Text, ".")
 		}
 	}
 	return count
@@ -218,9 +109,9 @@ func makeLabel(tokens []token) (labelPattern, string) {
 	var b strings.Builder
 	var capture string
 	for _, t := range tokens {
-		switch t.kind {
+		switch t.Kind {
 		case tokenLiteral:
-			text := lowerASCII(t.text)
+			text := lowerASCII(t.Text)
 			b.WriteString(text)
 			if !p.param && !p.catchAll {
 				p.prefix += text
@@ -229,10 +120,10 @@ func makeLabel(tokens []token) (labelPattern, string) {
 			}
 		case tokenParam:
 			p.param = true
-			capture = t.text
+			capture = t.Text
 		case tokenCatchAll:
 			p.catchAll = true
-			capture = t.text
+			capture = t.Text
 		}
 	}
 	p.raw = b.String()
@@ -302,23 +193,7 @@ func writeNormalizedPart(b *strings.Builder, kind byte, text string) {
 }
 
 func unescapeBraces(s string) string {
-	for i := 0; i < len(s); i++ {
-		if i+1 < len(s) && ((s[i] == '{' && s[i+1] == '{') || (s[i] == '}' && s[i+1] == '}')) {
-			var b strings.Builder
-			b.Grow(len(s) - 1)
-			b.WriteString(s[:i])
-			for ; i < len(s); i++ {
-				if i+1 < len(s) && ((s[i] == '{' && s[i+1] == '{') || (s[i] == '}' && s[i+1] == '}')) {
-					b.WriteByte(s[i])
-					i++
-					continue
-				}
-				b.WriteByte(s[i])
-			}
-			return b.String()
-		}
-	}
-	return s
+	return patternscan.UnescapeBraces(s)
 }
 
 func hasCatchAll(labels []labelPattern) bool {
