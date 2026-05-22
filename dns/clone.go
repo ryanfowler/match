@@ -31,7 +31,7 @@ func cloneRouteEntries[T any](routes []*routeEntry[T], entries map[*routeEntry[T
 		clonedEntry := new(routeEntry[T])
 		*clonedEntry = *entry
 		clonedEntry.labels = slices.Clone(entry.labels)
-		clonedEntry.captureNames = slices.Clone(entry.captureNames)
+		clonedEntry.captures = slices.Clone(entry.captures)
 		clonedRoutes[i] = clonedEntry
 		entries[entry] = clonedEntry
 	}

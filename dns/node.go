@@ -60,15 +60,18 @@ type token struct {
 type routeEntry[T any] struct {
 	pattern             string
 	labels              []labelPattern
-	captureNames        []string
-	captureCount        int
+	captures            []captureMeta
 	labelCount          int
 	order               int
 	firstStaticLabel    string
-	singleCaptureLabel  uint32
 	hasFirstStaticLabel bool
 	hasCatchAll         bool
 	value               T
+}
+
+type captureMeta struct {
+	index uint32
+	name  string
 }
 
 type node[T any] struct {

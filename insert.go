@@ -25,7 +25,7 @@ func (n *node[T]) insertLiteral(route string, value T) error {
 	}
 	normalized := normalizedStaticLiteral(route)
 	catchAllStaticConflict := n.root.conflictsWithCatchAllStaticPatterns(patterns, 0)
-	needsConflictCheck := entry.captureCount != 0 || catchAllStaticConflict
+	needsConflictCheck := len(entry.captures) != 0 || catchAllStaticConflict
 
 	return n.finishInsert(entry, normalized, needsConflictCheck)
 }
@@ -37,14 +37,12 @@ func (n *node[T]) insertDynamic(route string, value T) error {
 	}
 
 	segments := splitTokenSegments(tokens)
-	patterns, captureNames, singleCaptureSegment, captureCount := makeSegmentPatterns(segments)
+	patterns, captures := makeSegmentPatterns(segments)
 	firstStaticSegment, hasFirstStaticSegment := firstDefinitelyStaticSegment(patterns)
 	entry := &routeEntry[T]{
 		route:                 unescapeBraces(route),
 		patterns:              patterns,
-		captureNames:          captureNames,
-		singleCaptureSegment:  uint32(singleCaptureSegment),
-		captureCount:          captureCount,
+		captures:              captures,
 		segmentCount:          len(patterns),
 		order:                 len(n.routes),
 		firstStaticSegment:    firstStaticSegment,
@@ -52,7 +50,7 @@ func (n *node[T]) insertDynamic(route string, value T) error {
 		hasCatchAll:           hasCatchAll(patterns),
 		value:                 value,
 	}
-	needsConflictCheck := entry.captureCount != 0 || n.root.conflictsWithCatchAllStatic(segments, 0)
+	needsConflictCheck := len(entry.captures) != 0 || n.root.conflictsWithCatchAllStatic(segments, 0)
 
 	return n.finishInsert(entry, normalized, needsConflictCheck)
 }
@@ -82,7 +80,7 @@ func (n *node[T]) finishInsert(entry *routeEntry[T], normalized string, needsCon
 }
 
 func (n *node[T]) addExactStatic(entry *routeEntry[T]) {
-	if entry.captureCount != 0 || entry.hasCatchAll {
+	if len(entry.captures) != 0 || entry.hasCatchAll {
 		return
 	}
 	if n.exactStatic == nil {
@@ -99,13 +97,14 @@ func (n *node[T]) addFastRoute(entry *routeEntry[T]) {
 		n.hasComplexParams = true
 		return
 	}
-	if entry.captureCount == 0 {
+	capturesLen := len(entry.captures)
+	if capturesLen == 0 {
 		return
 	}
 	n.hasSimpleDynamic = true
 	n.fastRoot.insert(entry)
-	if entry.captureCount > n.maxSimpleCaptureCount {
-		n.maxSimpleCaptureCount = entry.captureCount
+	if capturesLen > n.maxSimpleCaptureCount {
+		n.maxSimpleCaptureCount = capturesLen
 	}
 }
 

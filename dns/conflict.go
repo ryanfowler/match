@@ -5,7 +5,7 @@ import (
 )
 
 func (i *routeConflictIndex[T]) add(entry *routeEntry[T]) {
-	if entry.captureCount == 0 {
+	if len(entry.captures) == 0 {
 		return
 	}
 	if i.byLabelCount == nil {
@@ -85,7 +85,7 @@ func earlierConflict[T any](a, b *routeEntry[T]) *routeEntry[T] {
 }
 
 func conflictsEntries[T any](a, b *routeEntry[T]) bool {
-	if a.captureCount == 0 || b.captureCount == 0 {
+	if len(a.captures) == 0 || len(b.captures) == 0 {
 		return false
 	}
 	if a.hasCatchAll || b.hasCatchAll {

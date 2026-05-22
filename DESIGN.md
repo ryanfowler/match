@@ -250,15 +250,18 @@ Every registered route becomes a `routeEntry[T]`:
 type routeEntry[T any] struct {
 	route                 string
 	patterns              []segmentPattern
-	captureNames          []string
-	captureCount          int
+	captures              []captureMeta
 	segmentCount          int
 	order                 int
 	firstStaticSegment    string
-	singleCaptureSegment  uint32
 	hasFirstStaticSegment bool
 	hasCatchAll           bool
 	value                 T
+}
+
+type captureMeta struct {
+	index uint32
+	name  string
 }
 ```
 
@@ -267,16 +270,12 @@ The fields serve distinct parts of the system:
 - `route` is the canonical route string used in conflict reporting. Dynamic
   routes have escaped braces unescaped before storage.
 - `patterns` contains one `segmentPattern` per path segment.
-- `captureNames` is indexed by segment number. This works because the grammar
-  permits at most one capture per segment.
-- `captureCount` is used to skip parameter collection work and decide whether
-  the conflict index needs the route.
+- `captures` stores capture metadata in route order. Each entry records the
+  segment index in `patterns` plus the canonical parameter name.
 - `segmentCount` lets the conflict index compare same-length routes quickly.
 - `order` preserves registration order for deterministic conflict reporting.
 - `firstStaticSegment` and `hasFirstStaticSegment` are used as conflict-index
   discriminators.
-- `singleCaptureSegment` is a fast path for collecting the common single-param
-  route.
 - `hasCatchAll` controls catch-all conflict-index behavior.
 - `value` is the caller-provided value returned on match.
 
@@ -648,14 +647,12 @@ This design has three advantages:
 `collectParams` has separate paths for:
 
 - Zero captures: return the input `Params` unchanged.
-- One capture: jump directly to `singleCaptureSegment`.
-- Multiple captures: scan the path and route patterns together.
+- One or more captures: walk directly to each captured segment recorded in the
+  route entry's capture metadata.
 
 For routes with more than four captures, `collectParams` calls
-`Params.ensureCapacity` before appending. The DNS sub-package uses the exported
-`Params.Grow` equivalent for the same behavior. This lets `Match` allocate once
-for a large capture set and lets `MatchInto` reuse caller-provided heap
-capacity.
+`Params.Grow` before appending. This lets `Match` allocate once for a large
+capture set and lets `MatchInto` reuse caller-provided heap capacity.
 
 Capture extraction uses the same helpers as matching:
 

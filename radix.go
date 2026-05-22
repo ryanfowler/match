@@ -198,17 +198,8 @@ func commonPrefixLen(a, b string) int {
 }
 
 func applySimpleParamNames[T any](entry *routeEntry[T], params *Params) {
-	if entry.captureCount == 0 {
-		return
-	}
-
-	index := 0
-	for _, name := range entry.captureNames {
-		if name == "" {
-			continue
-		}
-		params.setKey(index, name)
-		index++
+	for i, capture := range entry.captures {
+		params.setKey(i, capture.name)
 	}
 }
 

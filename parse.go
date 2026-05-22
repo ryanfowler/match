@@ -64,26 +64,17 @@ func countTokenSegments(tokens []token) int {
 	return count
 }
 
-func makeSegmentPatterns(segments [][]token) ([]segmentPattern, []string, int, int) {
+func makeSegmentPatterns(segments [][]token) ([]segmentPattern, []captureMeta) {
 	patterns := make([]segmentPattern, len(segments))
-	var captureNames []string
-	singleCaptureSegment := -1
-	captureCount := 0
+	var captures []captureMeta
 	for i := range segments {
 		var capture string
 		patterns[i], capture = makeSegment(segments[i])
 		if capture != "" {
-			if captureNames == nil {
-				captureNames = make([]string, len(segments))
-			}
-			captureNames[i] = capture
-			if captureCount == 0 {
-				singleCaptureSegment = i
-			}
-			captureCount++
+			captures = append(captures, captureMeta{index: uint32(i), name: capture})
 		}
 	}
-	return patterns, captureNames, singleCaptureSegment, captureCount
+	return patterns, captures
 }
 
 func firstDefinitelyStaticSegment(patterns []segmentPattern) (string, bool) {

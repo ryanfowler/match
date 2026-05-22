@@ -73,17 +73,19 @@ func (n *segmentNode[T]) matchPrefixPath(path string, index int, ignoreValue boo
 }
 
 func collectParams[T any](entry *routeEntry[T], path string, params *Params) {
-	if entry.captureCount == 0 {
+	captures := entry.captures
+	if len(captures) == 0 {
 		return
 	}
 
-	if entry.captureCount > inlineParams {
-		params.Grow(entry.captureCount)
+	if len(captures) > inlineParams {
+		params.Grow(len(captures))
 	}
 
-	if entry.captureCount == 1 {
+	if len(captures) == 1 {
+		capture := captures[0]
 		index := 0
-		captureSegment := int(entry.singleCaptureSegment)
+		captureSegment := int(capture.index)
 		for segmentIndex := 0; segmentIndex < captureSegment; segmentIndex++ {
 			_, index = nextPathSegment(path, index)
 			if index < 0 {
@@ -92,16 +94,15 @@ func collectParams[T any](entry *routeEntry[T], path string, params *Params) {
 		}
 
 		pattern := entry.patterns[captureSegment]
-		name := entry.captureNames[captureSegment]
 		if pattern.catchAll {
 			rest := path[index:]
 			if pattern.prefix == "" {
 				if rest != "" {
-					params.Append(name, rest)
+					params.Append(capture.name, rest)
 					return
 				}
 			} else if value, ok := matchCatchAllPattern(pattern, rest); ok {
-				params.Append(name, value)
+				params.Append(capture.name, value)
 				return
 			}
 			return
@@ -110,45 +111,56 @@ func collectParams[T any](entry *routeEntry[T], path string, params *Params) {
 		pathSegment, _ := nextPathSegment(path, index)
 		if pattern.prefix == "" && pattern.suffix == "" {
 			if pathSegment != "" {
-				params.Append(name, pathSegment)
+				params.Append(capture.name, pathSegment)
 				return
 			}
 		} else if value, ok := matchAffixedParamPattern(pattern, pathSegment); ok {
-			params.Append(name, value)
+			params.Append(capture.name, value)
 			return
 		}
 		return
 	}
 
 	index := 0
-	for i := range entry.patterns {
-		pattern := entry.patterns[i]
+	segmentIndex := 0
+	for _, capture := range captures {
+		captureSegment := int(capture.index)
+		for segmentIndex < captureSegment {
+			_, index = nextPathSegment(path, index)
+			if index < 0 {
+				return
+			}
+			segmentIndex++
+		}
+
+		pattern := entry.patterns[captureSegment]
 		if pattern.catchAll {
 			rest := path[index:]
 			if pattern.prefix == "" {
 				if rest != "" {
-					params.Append(entry.captureNames[i], rest)
+					params.Append(capture.name, rest)
+					return
 				}
 			} else if value, ok := matchCatchAllPattern(pattern, rest); ok {
-				params.Append(entry.captureNames[i], value)
+				params.Append(capture.name, value)
+				return
 			}
 			return
 		}
 
 		pathSegment, next := nextPathSegment(path, index)
-		if pattern.param {
-			if pattern.prefix == "" && pattern.suffix == "" {
-				if pathSegment != "" {
-					params.Append(entry.captureNames[i], pathSegment)
-				}
-			} else if value, ok := matchAffixedParamPattern(pattern, pathSegment); ok {
-				params.Append(entry.captureNames[i], value)
+		if pattern.prefix == "" && pattern.suffix == "" {
+			if pathSegment != "" {
+				params.Append(capture.name, pathSegment)
 			}
+		} else if value, ok := matchAffixedParamPattern(pattern, pathSegment); ok {
+			params.Append(capture.name, value)
 		}
 		index = next
 		if index < 0 {
 			return
 		}
+		segmentIndex = captureSegment + 1
 	}
 }
 

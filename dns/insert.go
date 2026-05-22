@@ -13,7 +13,7 @@ func (n *node[T]) insert(pattern string, value T) error {
 		return &ConflictError{Pattern: entry.pattern, With: existing}
 	}
 
-	if entry.captureCount != 0 {
+	if len(entry.captures) != 0 {
 		if existing := n.conflictIndex.findConflict(entry); existing != nil {
 			return &ConflictError{Pattern: entry.pattern, With: existing.pattern}
 		}
@@ -27,7 +27,7 @@ func (n *node[T]) insert(pattern string, value T) error {
 }
 
 func makeRouteEntry[T any](pattern string, value T, order int) (*routeEntry[T], string, error) {
-	labels, captureNames, singleCaptureLabel, captureCount, canonicalPattern, err := parsePattern(pattern)
+	labels, captures, canonicalPattern, err := parsePattern(pattern)
 	if err != nil {
 		return nil, "", err
 	}
@@ -36,9 +36,7 @@ func makeRouteEntry[T any](pattern string, value T, order int) (*routeEntry[T], 
 	entry := &routeEntry[T]{
 		pattern:             canonicalPattern,
 		labels:              labels,
-		captureNames:        captureNames,
-		singleCaptureLabel:  uint32(singleCaptureLabel),
-		captureCount:        captureCount,
+		captures:            captures,
 		labelCount:          len(labels),
 		order:               order,
 		firstStaticLabel:    firstStaticLabel,

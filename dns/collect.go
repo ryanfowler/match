@@ -77,21 +77,26 @@ func betterSuffixMatch[T any](best, candidate suffixRouteMatch[T]) suffixRouteMa
 }
 
 func collectParams[T any](entry *routeEntry[T], host string, start int, params *Params) {
-	if entry.captureCount == 0 {
+	captures := entry.captures
+	if len(captures) == 0 {
 		return
 	}
 
-	if entry.captureCount > inlineParamCapacity {
-		params.Grow(entry.captureCount)
+	if len(captures) > inlineParamCapacity {
+		params.Grow(len(captures))
 	}
-	if entry.captureCount == 1 {
-		labelIndex := int(entry.singleCaptureLabel)
+
+	if len(captures) == 1 {
+		capture := captures[0]
+		labelIndex := int(capture.index)
 		pattern := entry.labels[labelIndex]
-		name := entry.captureNames[labelIndex]
 		if pattern.catchAll {
 			catchEnd := indexBeforeRightLabels(host, len(entry.labels)-1)
+			if catchEnd < start {
+				return
+			}
 			if value, ok := matchCatchAllPattern(pattern, host[start:catchEnd]); ok {
-				params.Append(name, value)
+				params.Append(capture.name, value)
 				return
 			}
 			return
@@ -110,50 +115,48 @@ func collectParams[T any](entry *routeEntry[T], host string, start int, params *
 			return
 		}
 		if value, ok := matchParamCapture(pattern, label); ok {
-			params.Append(name, value)
+			params.Append(capture.name, value)
 			return
 		}
 		return
 	}
 
-	if entry.labels[0].catchAll {
-		catchEnd := indexBeforeRightLabels(host, len(entry.labels)-1)
-		pattern := entry.labels[0]
-		value, ok := matchCatchAllPattern(pattern, host[start:catchEnd])
-		if ok {
-			params.Append(entry.captureNames[0], value)
-		}
-
-		if len(entry.labels) == 1 {
-			return
-		}
-		start = catchEnd + 1
-		for i := 1; i < len(entry.labels); i++ {
-			label, next, ok := nextHostLabel(host, start)
-			if !ok {
+	labelStart := start
+	labelIndex := 0
+	for _, capture := range captures {
+		captureLabel := int(capture.index)
+		pattern := entry.labels[captureLabel]
+		if pattern.catchAll {
+			catchEnd := indexBeforeRightLabels(host, len(entry.labels)-1)
+			if catchEnd < start {
 				return
 			}
-			if entry.labels[i].param {
-				if value, ok := matchParamCapture(entry.labels[i], label); ok {
-					params.Append(entry.captureNames[i], value)
-				}
+			if value, ok := matchCatchAllPattern(pattern, host[start:catchEnd]); ok {
+				params.Append(capture.name, value)
 			}
-			start = next
+			labelStart = catchEnd + 1
+			labelIndex = captureLabel + 1
+			continue
 		}
-		return
-	}
 
-	for i := range entry.labels {
-		label, next, ok := nextHostLabel(host, start)
+		for labelIndex < captureLabel {
+			_, next, ok := nextHostLabel(host, labelStart)
+			if !ok || next < 0 {
+				return
+			}
+			labelStart = next
+			labelIndex++
+		}
+
+		label, next, ok := nextHostLabel(host, labelStart)
 		if !ok {
 			return
 		}
-		if entry.labels[i].param {
-			if value, ok := matchParamCapture(entry.labels[i], label); ok {
-				params.Append(entry.captureNames[i], value)
-			}
+		if value, ok := matchParamCapture(pattern, label); ok {
+			params.Append(capture.name, value)
 		}
-		start = next
+		labelStart = next
+		labelIndex = captureLabel + 1
 	}
 }
 

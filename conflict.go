@@ -5,7 +5,7 @@ import (
 )
 
 func (i *routeConflictIndex[T]) add(entry *routeEntry[T]) {
-	if entry.captureCount == 0 {
+	if len(entry.captures) == 0 {
 		return
 	}
 	if i.bySegmentCount == nil {
@@ -70,7 +70,7 @@ func findConflictInRoutes[T any](routes []*routeEntry[T], entry *routeEntry[T], 
 		if skipSegmentCount != 0 && existing.segmentCount == skipSegmentCount {
 			continue
 		}
-		if entry.captureCount == 0 && existing.captureCount == 0 {
+		if len(entry.captures) == 0 && len(existing.captures) == 0 {
 			continue
 		}
 		if conflictsEntries(existing, entry) {
@@ -120,7 +120,7 @@ func conflictsPatterns(as, bs []segmentPattern) bool {
 }
 
 func hasCatchAllPrefixConflict[T any](a, b *routeEntry[T]) bool {
-	if b.captureCount == 0 {
+	if len(b.captures) == 0 {
 		return false
 	}
 	for i, pattern := range a.patterns {
