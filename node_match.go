@@ -42,7 +42,6 @@ func (n *node[T]) matchInto(route string, params *Params) (T, bool) {
 			applySimpleParamNames(entry, params)
 			return entry.value, true
 		}
-		params.Reset()
 		var val T
 		return val, false
 	}
