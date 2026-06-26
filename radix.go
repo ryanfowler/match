@@ -128,23 +128,6 @@ func (n *simpleRadixNode[T]) insertStaticEdge(path string) (*simpleRadixNode[T],
 }
 
 func (n *simpleRadixNode[T]) match(path string, index int, params *Params) (*routeEntry[T], bool) {
-	// Walk down pure-static nodes (no param/catchAll fallback) without
-	// recursion, since descent through them is fully deterministic.
-	for n.param == nil && n.catchAll == nil {
-		if index == len(path) {
-			if n.value != nil {
-				return n.value, true
-			}
-			return nil, false
-		}
-		child, next := n.staticChild(path, index)
-		if child == nil {
-			return nil, false
-		}
-		n = child
-		index = next
-	}
-
 	if index == len(path) {
 		if n.value != nil {
 			return n.value, true
@@ -182,13 +165,12 @@ func (n *simpleRadixNode[T]) staticChild(path string, index int) (*simpleRadixNo
 	if index >= len(path) {
 		return nil, 0
 	}
-	rest := path[index:]
 	for i := range n.static {
 		edge := &n.static[i]
-		if rest[0] != edge.label[0] {
+		if path[index] != edge.label[0] {
 			continue
 		}
-		if strings.HasPrefix(rest, edge.label) {
+		if len(edge.label) <= len(path)-index && strings.HasPrefix(path[index:], edge.label) {
 			return edge.child, index + len(edge.label)
 		}
 	}
