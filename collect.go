@@ -126,7 +126,7 @@ func collectParams[T any](entry *routeEntry[T], path string, params *Params) {
 	for _, capture := range captures {
 		captureSegment := int(capture.index)
 		for segmentIndex < captureSegment {
-			_, index = nextPathSegment(path, index)
+			index = skipPathSegment(path, index)
 			if index < 0 {
 				return
 			}

@@ -222,6 +222,16 @@ func nextPathSegment(path string, index int) (string, int) {
 	}
 	return path[index:], -1
 }
+
+func skipPathSegment(path string, index int) int {
+	if index >= len(path) {
+		return -1
+	}
+	if slash := strings.IndexByte(path[index:], '/'); slash >= 0 {
+		return index + slash + 1
+	}
+	return -1
+}
 func sortParamEdges[T any](edges []paramEdge[T]) {
 	for i := 1; i < len(edges); i++ {
 		for j := i; j > 0 && paramEdgeLess(edges[j], edges[j-1]); j-- {
