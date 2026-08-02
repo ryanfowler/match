@@ -15,6 +15,11 @@ func (n *node[T]) match(hostname string) (T, Params, bool) {
 			var val T
 			return val, Params{}, false
 		}
+		if entry, ok := n.root.matchStaticHostFolded(host, len(host)); ok {
+			return entry.value, Params{}, true
+		}
+		var val T
+		return val, Params{}, false
 	}
 
 	entry, ok := n.root.matchHost(host, len(host))
@@ -43,6 +48,11 @@ func (n *node[T]) matchInto(hostname string, params *Params) (T, bool) {
 			var val T
 			return val, false
 		}
+		if entry, ok := n.root.matchStaticHostFolded(host, len(host)); ok {
+			return entry.value, true
+		}
+		var val T
+		return val, false
 	}
 
 	entry, ok := n.root.matchHost(host, len(host))
