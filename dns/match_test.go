@@ -43,6 +43,25 @@ func TestMatchCore(t *testing.T) {
 	}
 }
 
+func TestMatchStaticCaseInsensitiveIndexed(t *testing.T) {
+	var router Router[string]
+	for i := 0; i < 12; i++ {
+		router.Insert(fmt.Sprintf("static-%02d.example.com", i), fmt.Sprintf("static-%02d", i))
+	}
+
+	if got, params, ok := router.Match("STATIC-11.EXAMPLE.COM"); !ok || got != "static-11" || params.Len() != 0 {
+		t.Fatalf("Match uppercase indexed static = %q, %#v, %v; want static-11, no params, true", got, params.All(), ok)
+	}
+
+	params := ParamsOf(Param{Key: "stale", Val: "value"})
+	if got, ok := router.MatchInto("STATIC-11.EXAMPLE.COM", &params); !ok || got != "static-11" || params.Len() != 0 {
+		t.Fatalf("MatchInto uppercase indexed static = %q, %#v, %v; want static-11, no params, true", got, params.All(), ok)
+	}
+	if _, _, ok := router.Match("MISSING.EXAMPLE.COM"); ok {
+		t.Fatal("uppercase static miss matched unexpectedly")
+	}
+}
+
 func TestMatchMissesMalformedHostnames(t *testing.T) {
 	var router Router[string]
 	router.Insert("example.com", "apex")
