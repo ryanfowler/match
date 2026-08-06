@@ -21,19 +21,28 @@ func (n *node[T]) insertTree(entry *routeEntry[T]) {
 			current = child
 		} else {
 			var child *labelNode[T]
-			for j := range current.params {
-				if sameLabelPattern(current.params[j].pattern, pattern) {
-					child = current.params[j].child
-					break
+			if pattern.prefix == "" && pattern.suffix == "" {
+				if current.plainParam != nil {
+					child = current.plainParam.child
+				} else {
+					child = &labelNode[T]{}
+					current.plainParam = &paramEdge[T]{pattern: pattern, child: child}
 				}
-			}
-			if child == nil {
-				child = &labelNode[T]{}
-				current.params = append(current.params, paramEdge[T]{
-					pattern: pattern,
-					child:   child,
-				})
-				sortParamEdges(current.params)
+			} else {
+				for j := range current.affixedParams {
+					if sameLabelPattern(current.affixedParams[j].pattern, pattern) {
+						child = current.affixedParams[j].child
+						break
+					}
+				}
+				if child == nil {
+					child = &labelNode[T]{}
+					current.affixedParams = append(current.affixedParams, paramEdge[T]{
+						pattern: pattern,
+						child:   child,
+					})
+					sortParamEdges(current.affixedParams)
+				}
 			}
 			current = child
 		}
@@ -63,32 +72,44 @@ func (n *labelNode[T]) matchHost(host string, end int) (*routeEntry[T], bool) {
 		}
 	}
 
-	for i := range n.params {
-		pattern := n.params[i].pattern
-		if pattern.prefix == "" && pattern.suffix == "" {
-			if label == "" {
+	if len(n.affixedParams) == 0 {
+		if n.plainParam != nil {
+			if entry, ok := n.plainParam.child.matchHost(host, next); ok {
+				return entry, true
+			}
+		}
+	} else {
+		for i := range n.affixedParams {
+			pattern := n.affixedParams[i].pattern
+			if _, ok := matchAffixedParamPattern(pattern, label); !ok {
 				continue
 			}
-		} else if _, ok := matchAffixedParamPattern(pattern, label); !ok {
-			continue
-		}
-		if entry, ok := n.params[i].child.matchHost(host, next); ok {
-			bestEntry := entry
-			for j := i + 1; j < len(n.params); j++ {
-				pattern := n.params[j].pattern
-				if pattern.prefix == "" && pattern.suffix == "" {
-					if label == "" {
+			if entry, ok := n.affixedParams[i].child.matchHost(host, next); ok {
+				bestEntry := entry
+				for j := i + 1; j < len(n.affixedParams); j++ {
+					pattern := n.affixedParams[j].pattern
+					if _, ok := matchAffixedParamPattern(pattern, label); !ok {
 						continue
 					}
-				} else if _, ok := matchAffixedParamPattern(pattern, label); !ok {
-					continue
+					entry, ok := n.affixedParams[j].child.matchHost(host, next)
+					if ok && moreSpecificRoute(entry, bestEntry) {
+						bestEntry = entry
+					}
 				}
-				entry, ok := n.params[j].child.matchHost(host, next)
-				if ok && moreSpecificRoute(entry, bestEntry) {
-					bestEntry = entry
+				if n.plainParam != nil {
+					entry, ok := n.plainParam.child.matchHost(host, next)
+					if ok && moreSpecificRoute(entry, bestEntry) {
+						bestEntry = entry
+					}
 				}
+				return bestEntry, true
 			}
-			return bestEntry, true
+		}
+
+		if n.plainParam != nil {
+			if entry, ok := n.plainParam.child.matchHost(host, next); ok {
+				return entry, true
+			}
 		}
 	}
 

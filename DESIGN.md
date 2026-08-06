@@ -99,7 +99,8 @@ labelNode[T]
   static          []staticEdge[T]
   staticIndex     map[string]*labelNode[T]
   staticFoldIndex map[foldedLabelKey]*labelNode[T]
-  params          []paramEdge[T]
+  plainParam      *paramEdge[T]
+  affixedParams   []paramEdge[T]
   catchAll        []catchAllEdge[T]
   value           *routeEntry[T]
 ```
@@ -108,7 +109,9 @@ The DNS package keeps literal labels lowercased in route entries and trie edges.
 Hot-path matching does not lowercase the input hostname. If the candidate label
 is already lowercase, indexed static lookup can use the label directly. Larger
 static fanouts also keep a folded fixed-size label index so uppercase lookups
-remain indexed without allocating a lowercased string.
+remain indexed without allocating a lowercased string. Plain parameter edges
+are stored separately from affixed parameter edges, which removes affix checks
+from the common whole-label parameter path.
 
 Insertion uses an exact-static map for literal hostname duplicates and
 normalized pattern shapes for dynamic duplicates independent of parameter names
@@ -257,6 +260,7 @@ type routeEntry[T any] struct {
 	patterns              []segmentPattern
 	captures              []captureMeta
 	segmentCount          int
+	firstCaptureOffset    int
 	order                 int
 	firstStaticSegment    string
 	hasFirstStaticSegment bool
@@ -278,6 +282,9 @@ The fields serve distinct parts of the system:
 - `captures` stores capture metadata in route order. Each entry records the
   segment index in `patterns` plus the canonical parameter name.
 - `segmentCount` lets the conflict index compare same-length routes quickly.
+- `firstCaptureOffset` stores the known path offset of the first capture. All
+  earlier segments are literal, so one-capture routes can collect the value
+  without scanning from the start of the path.
 - `order` preserves registration order for deterministic conflict reporting.
 - `firstStaticSegment` and `hasFirstStaticSegment` are used as conflict-index
   discriminators.
@@ -406,11 +413,12 @@ The matching trie is built from `segmentNode[T]` values:
 
 ```go
 type segmentNode[T any] struct {
-	static      []staticEdge[T]
-	staticIndex map[string]*segmentNode[T]
-	params      []paramEdge[T]
-	catchAll    []catchAllEdge[T]
-	value       *routeEntry[T]
+	static        []staticEdge[T]
+	staticIndex   map[string]*segmentNode[T]
+	plainParam    *paramEdge[T]
+	affixedParams []paramEdge[T]
+	catchAll      []catchAllEdge[T]
+	value         *routeEntry[T]
 }
 ```
 
@@ -667,10 +675,11 @@ For routes with more than four captures, `collectParams` calls
 `Params.Grow` before appending. This lets `Match` allocate once for a large
 capture set and lets `MatchInto` reuse caller-provided heap capacity.
 
-Capture extraction uses the same helpers as matching:
-
-- `matchAffixedParamPattern` for prefix/suffix parameters.
-- `matchCatchAllPattern` for catch-all parameters.
+Matching validates each capture before route selection. Parameter collection
+therefore slices the matched path directly by the stored prefix and suffix
+lengths. It does not repeat affix validation. DNS catch-all entries with one
+capture also cache the fixed byte length of their literal suffix, so collection
+does not scan the matched hostname a second time.
 
 ## Params Architecture
 
@@ -767,6 +776,8 @@ The implementation is tuned around common routing workloads:
 - Matching walks by path segment instead of scanning all routes.
 - Static edges stay slice-backed for small fanout and gain a map at
   `staticChildMapThreshold`.
+- DNS static-only suffix matching uses an iterative trie walk and does not run
+  the dynamic branch-selection logic.
 - Parameter edges are ordered by specificity to find likely winners early.
 - Captures are collected after route selection to keep branch exploration cheap.
 - Up to four captures are inline in `Params`.

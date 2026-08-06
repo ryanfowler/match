@@ -79,6 +79,7 @@ func makeRouteEntry[T any](pattern string, value T, order int) (*routeEntry[T], 
 		labels:              labels,
 		captures:            captures,
 		labelCount:          len(labels),
+		singleCatchSuffix:   singleCatchSuffix(labels, captures),
 		order:               order,
 		firstStaticLabel:    firstStaticLabel,
 		hasFirstStaticLabel: hasFirstStaticLabel,
@@ -90,6 +91,18 @@ func makeRouteEntry[T any](pattern string, value T, order int) (*routeEntry[T], 
 		return entry, exactStaticKey(canonicalPattern, labels), nil
 	}
 	return entry, normalizedLabels(labels), nil
+}
+
+func singleCatchSuffix(labels []labelPattern, captures []captureMeta) int {
+	if len(captures) != 1 || !labels[captures[0].index].catchAll {
+		return 0
+	}
+
+	suffix := 0
+	for i := int(captures[0].index) + 1; i < len(labels); i++ {
+		suffix += len(labels[i].raw) + 1
+	}
+	return suffix
 }
 
 func exactStaticKey(pattern string, labels []labelPattern) string {

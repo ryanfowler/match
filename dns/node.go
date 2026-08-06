@@ -58,6 +58,7 @@ type routeEntry[T any] struct {
 	labels              []labelPattern
 	captures            []captureMeta
 	labelCount          int
+	singleCatchSuffix   int
 	order               int
 	firstStaticLabel    string
 	hasFirstStaticLabel bool
@@ -88,7 +89,8 @@ type labelNode[T any] struct {
 	static          []staticEdge[T]
 	staticIndex     map[string]*labelNode[T]
 	staticFoldIndex map[foldedLabelKey]*labelNode[T]
-	params          []paramEdge[T]
+	plainParam      *paramEdge[T]
+	affixedParams   []paramEdge[T]
 	catchAll        []catchAllEdge[T]
 	value           *routeEntry[T]
 }

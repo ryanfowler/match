@@ -36,16 +36,18 @@ func (n *labelNode[T]) matchSuffixHost(host string, end, consumed int) (suffixRo
 			}
 		}
 
-		for i := range n.params {
-			pattern := n.params[i].pattern
-			if pattern.prefix == "" && pattern.suffix == "" {
-				if label == "" {
-					continue
-				}
-			} else if _, ok := matchAffixedParamPattern(pattern, label); !ok {
+		for i := range n.affixedParams {
+			pattern := n.affixedParams[i].pattern
+			if _, ok := matchAffixedParamPattern(pattern, label); !ok {
 				continue
 			}
-			if candidate, ok := n.params[i].child.matchSuffixHost(host, next, consumed+1); ok {
+			if candidate, ok := n.affixedParams[i].child.matchSuffixHost(host, next, consumed+1); ok {
+				best = betterSuffixMatch(best, candidate)
+			}
+		}
+
+		if n.plainParam != nil {
+			if candidate, ok := n.plainParam.child.matchSuffixHost(host, next, consumed+1); ok {
 				best = betterSuffixMatch(best, candidate)
 			}
 		}
@@ -67,6 +69,32 @@ func (n *labelNode[T]) matchSuffixHost(host string, end, consumed int) (suffixRo
 		}
 	}
 
+	return best, best.entry != nil
+}
+
+func (n *labelNode[T]) matchStaticSuffixHost(host string, end int) (suffixRouteMatch[T], bool) {
+	current := n
+	var best suffixRouteMatch[T]
+	consumed := 0
+	for end >= 0 {
+		label, next, ok := prevHostLabel(host, end)
+		if !ok {
+			break
+		}
+		current = current.staticChild(label)
+		if current == nil {
+			break
+		}
+		consumed++
+		end = next
+		if current.value != nil {
+			best = suffixRouteMatch[T]{
+				entry:     current.value,
+				prefixEnd: end,
+				consumed:  consumed,
+			}
+		}
+	}
 	return best, best.entry != nil
 }
 
@@ -95,14 +123,11 @@ func collectParams[T any](entry *routeEntry[T], host string, start int, params *
 		labelIndex := int(capture.index)
 		pattern := entry.labels[labelIndex]
 		if pattern.catchAll {
-			catchEnd := indexBeforeRightLabels(host, len(entry.labels)-1)
+			catchEnd := len(host) - entry.singleCatchSuffix
 			if catchEnd < start {
 				return
 			}
-			if value, ok := matchCatchAllPattern(pattern, host[start:catchEnd]); ok {
-				params.Append(capture.name, value)
-				return
-			}
+			params.Append(capture.name, host[start+len(pattern.prefix):catchEnd])
 			return
 		}
 
@@ -118,10 +143,7 @@ func collectParams[T any](entry *routeEntry[T], host string, start int, params *
 		if !ok {
 			return
 		}
-		if value, ok := matchParamCapture(pattern, label); ok {
-			params.Append(capture.name, value)
-			return
-		}
+		params.Append(capture.name, label[len(pattern.prefix):len(label)-len(pattern.suffix)])
 		return
 	}
 
@@ -135,9 +157,7 @@ func collectParams[T any](entry *routeEntry[T], host string, start int, params *
 			if catchEnd < start {
 				return
 			}
-			if value, ok := matchCatchAllPattern(pattern, host[start:catchEnd]); ok {
-				params.Append(capture.name, value)
-			}
+			params.Append(capture.name, host[start+len(pattern.prefix):catchEnd])
 			labelStart = catchEnd + 1
 			labelIndex = captureLabel + 1
 			continue
@@ -156,19 +176,10 @@ func collectParams[T any](entry *routeEntry[T], host string, start int, params *
 		if !ok {
 			return
 		}
-		if value, ok := matchParamCapture(pattern, label); ok {
-			params.Append(capture.name, value)
-		}
+		params.Append(capture.name, label[len(pattern.prefix):len(label)-len(pattern.suffix)])
 		labelStart = next
 		labelIndex = captureLabel + 1
 	}
-}
-
-func matchParamCapture(pattern labelPattern, label string) (string, bool) {
-	if pattern.prefix == "" && pattern.suffix == "" {
-		return label, label != ""
-	}
-	return matchAffixedParamPattern(pattern, label)
 }
 
 func moreSpecificRoute[T any](a, b *routeEntry[T]) bool {

@@ -47,6 +47,7 @@ type routeEntry[T any] struct {
 	patterns              []segmentPattern
 	captures              []captureMeta
 	segmentCount          int
+	firstCaptureOffset    int
 	order                 int
 	firstStaticSegment    string
 	hasFirstStaticSegment bool

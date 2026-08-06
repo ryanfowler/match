@@ -70,7 +70,12 @@ func (n *node[T]) matchSuffix(hostname string) (SuffixMatch[T], bool) {
 		return SuffixMatch[T]{}, false
 	}
 
-	match, ok := n.root.matchSuffixHost(host, len(host), 0)
+	var match suffixRouteMatch[T]
+	if n.hasDynamic {
+		match, ok = n.root.matchSuffixHost(host, len(host), 0)
+	} else {
+		match, ok = n.root.matchStaticSuffixHost(host, len(host))
+	}
 	if !ok {
 		return SuffixMatch[T]{}, false
 	}
@@ -89,7 +94,12 @@ func (n *node[T]) matchSuffixInto(hostname string, params *Params) (SuffixMatch[
 		return SuffixMatch[T]{Params: *params}, false
 	}
 
-	match, ok := n.root.matchSuffixHost(host, len(host), 0)
+	var match suffixRouteMatch[T]
+	if n.hasDynamic {
+		match, ok = n.root.matchSuffixHost(host, len(host), 0)
+	} else {
+		match, ok = n.root.matchStaticSuffixHost(host, len(host))
+	}
 	if !ok {
 		return SuffixMatch[T]{Params: *params}, false
 	}
