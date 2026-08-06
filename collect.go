@@ -84,40 +84,16 @@ func collectParams[T any](entry *routeEntry[T], path string, params *Params) {
 
 	if len(captures) == 1 {
 		capture := captures[0]
-		index := 0
+		index := entry.firstCaptureOffset
 		captureSegment := int(capture.index)
-		for segmentIndex := 0; segmentIndex < captureSegment; segmentIndex++ {
-			_, index = nextPathSegment(path, index)
-			if index < 0 {
-				return
-			}
-		}
-
 		pattern := entry.patterns[captureSegment]
 		if pattern.catchAll {
-			rest := path[index:]
-			if pattern.prefix == "" {
-				if rest != "" {
-					params.Append(capture.name, rest)
-					return
-				}
-			} else if value, ok := matchCatchAllPattern(pattern, rest); ok {
-				params.Append(capture.name, value)
-				return
-			}
+			params.Append(capture.name, path[index+len(pattern.prefix):])
 			return
 		}
 
 		pathSegment, _ := nextPathSegment(path, index)
-		if pattern.prefix == "" && pattern.suffix == "" {
-			if pathSegment != "" {
-				params.Append(capture.name, pathSegment)
-				return
-			}
-		} else if value, ok := matchAffixedParamPattern(pattern, pathSegment); ok {
-			params.Append(capture.name, value)
-			return
-		}
+		params.Append(capture.name, pathSegment[len(pattern.prefix):len(pathSegment)-len(pattern.suffix)])
 		return
 	}
 
@@ -135,27 +111,12 @@ func collectParams[T any](entry *routeEntry[T], path string, params *Params) {
 
 		pattern := entry.patterns[captureSegment]
 		if pattern.catchAll {
-			rest := path[index:]
-			if pattern.prefix == "" {
-				if rest != "" {
-					params.Append(capture.name, rest)
-					return
-				}
-			} else if value, ok := matchCatchAllPattern(pattern, rest); ok {
-				params.Append(capture.name, value)
-				return
-			}
+			params.Append(capture.name, path[index+len(pattern.prefix):])
 			return
 		}
 
 		pathSegment, next := nextPathSegment(path, index)
-		if pattern.prefix == "" && pattern.suffix == "" {
-			if pathSegment != "" {
-				params.Append(capture.name, pathSegment)
-			}
-		} else if value, ok := matchAffixedParamPattern(pattern, pathSegment); ok {
-			params.Append(capture.name, value)
-		}
+		params.Append(capture.name, pathSegment[len(pattern.prefix):len(pathSegment)-len(pattern.suffix)])
 		index = next
 		if index < 0 {
 			return

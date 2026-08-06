@@ -50,6 +50,16 @@ func BenchmarkMatch(b *testing.B) {
 			routes: generatedBenchmarkRoutes(1000),
 			path:   "/route/999/detail",
 		},
+		{
+			name:   "DynamicMany1000",
+			routes: generatedDynamicBenchmarkRoutes(1000),
+			path:   "/route-999/value",
+		},
+		{
+			name:   "AffixedParam",
+			routes: []string{"/", "/files/{name}.json", "/assets/{*path}"},
+			path:   "/files/report.json",
+		},
 	}
 
 	for _, bm := range benchmarks {

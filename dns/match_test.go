@@ -24,8 +24,8 @@ func TestMatchCore(t *testing.T) {
 	tests := []matchCase{
 		{"EXAMPLE.com.", "example.com", Params{}},
 		{"WWW.Example.Com", "www.example.com", Params{}},
-		{"admin.example.com", "{tenant}.example.com", ParamsOf(Param{"tenant", "admin"})},
-		{"api-US.example.com", "api-{region}.example.com", ParamsOf(Param{"region", "US"})},
+		{"admin.example.com", "{tenant}.example.com", ParamsOf(Param{Key: "tenant", Val: "admin"})},
+		{"api-US.example.com", "api-{region}.example.com", ParamsOf(Param{Key: "region", Val: "US"})},
 		{"{literal}.example.com", "{{literal}}.example.com", Params{}},
 	}
 
@@ -96,7 +96,7 @@ func TestHostnameLengthBoundaries(t *testing.T) {
 	if err := dynamic.TryInsert("{tenant}."+maxDynamicSuffix, "max-dynamic"); err != nil {
 		t.Fatalf("insert max dynamic hostname: %v", err)
 	}
-	if got, params, ok := dynamic.Match("x." + maxDynamicSuffix); !ok || got != "max-dynamic" || !paramsEqual(params, ParamsOf(Param{"tenant", "x"})) {
+	if got, params, ok := dynamic.Match("x." + maxDynamicSuffix); !ok || got != "max-dynamic" || !paramsEqual(params, ParamsOf(Param{Key: "tenant", Val: "x"})) {
 		t.Fatalf("match max dynamic hostname = %q %#v %v; want max-dynamic tenant=x true", got, params.All(), ok)
 	}
 	if err := dynamic.TryInsert("{tenant}."+tooLongDynamicSuffix, "too-long"); !errors.Is(err, ErrInvalidHostname) {
@@ -113,8 +113,8 @@ func TestCatchAllMatchesLeadingLabels(t *testing.T) {
 	tests := []matchCase{
 		{"example.com", "apex", Params{}},
 		{"www.example.com", "www", Params{}},
-		{"api.example.com", "subdomain", ParamsOf(Param{"subdomain", "api"})},
-		{"A.B.Example.COM.", "subdomain", ParamsOf(Param{"subdomain", "A.B"})},
+		{"api.example.com", "subdomain", ParamsOf(Param{Key: "subdomain", Val: "api"})},
+		{"A.B.Example.COM.", "subdomain", ParamsOf(Param{Key: "subdomain", Val: "A.B"})},
 	}
 
 	for _, tt := range tests {
@@ -156,7 +156,7 @@ func TestPrefixedCatchAll(t *testing.T) {
 	if got != "svc" {
 		t.Fatalf("value = %q, want svc", got)
 	}
-	if !paramsEqual(params, ParamsOf(Param{"subdomain", "api.us"})) {
+	if !paramsEqual(params, ParamsOf(Param{Key: "subdomain", Val: "api.us"})) {
 		t.Fatalf("params = %#v, want subdomain=api.us", params.All())
 	}
 
@@ -180,7 +180,7 @@ func TestPrefixedCatchAllAllowsRoutesWithEmptyFirstCapture(t *testing.T) {
 	if !ok {
 		t.Fatal("match prefixed catch-all: not found")
 	}
-	if got != "svc" || !paramsEqual(params, ParamsOf(Param{"subdomain", "api.us"})) {
+	if got != "svc" || !paramsEqual(params, ParamsOf(Param{Key: "subdomain", Val: "api.us"})) {
 		t.Fatalf("prefixed catch-all = %q %#v, want svc subdomain=api.us", got, params.All())
 	}
 
@@ -188,7 +188,7 @@ func TestPrefixedCatchAllAllowsRoutesWithEmptyFirstCapture(t *testing.T) {
 	if !ok {
 		t.Fatal("match route with empty first catch-all capture: not found")
 	}
-	if got != "region" || !paramsEqual(params, ParamsOf(Param{"region", "us"})) {
+	if got != "region" || !paramsEqual(params, ParamsOf(Param{Key: "region", Val: "us"})) {
 		t.Fatalf("empty first capture route = %q %#v, want region region=us", got, params.All())
 	}
 }
@@ -204,7 +204,7 @@ func TestCatchAllCollectsSuffixParams(t *testing.T) {
 	if got != "zone" {
 		t.Fatalf("value = %q, want zone", got)
 	}
-	if !paramsEqual(params, ParamsOf(Param{"subdomain", "api.us"}, Param{"zone", "example"})) {
+	if !paramsEqual(params, ParamsOf(Param{Key: "subdomain", Val: "api.us"}, Param{Key: "zone", Val: "example"})) {
 		t.Fatalf("params = %#v, want subdomain and zone", params.All())
 	}
 }
@@ -226,7 +226,7 @@ func TestMatchChoosesRightmostLiteralSpecificity(t *testing.T) {
 		if got != "{host}.api.example.com" {
 			t.Fatalf("pattern = %q, want {host}.api.example.com", got)
 		}
-		if !paramsEqual(params, ParamsOf(Param{"host", "foo"})) {
+		if !paramsEqual(params, ParamsOf(Param{Key: "host", Val: "foo"})) {
 			t.Fatalf("params = %#v, want host=foo", params.All())
 		}
 	}
@@ -312,8 +312,8 @@ func TestAllowsDisjointDynamicPatterns(t *testing.T) {
 			first:  "api-{region}.example.com",
 			second: "web-{region}.example.com",
 			matches: []matchCase{
-				{"api-us.example.com", "api-{region}.example.com", ParamsOf(Param{"region", "us"})},
-				{"web-eu.example.com", "web-{region}.example.com", ParamsOf(Param{"region", "eu"})},
+				{"api-us.example.com", "api-{region}.example.com", ParamsOf(Param{Key: "region", Val: "us"})},
+				{"web-eu.example.com", "web-{region}.example.com", ParamsOf(Param{Key: "region", Val: "eu"})},
 			},
 		},
 		{
@@ -321,8 +321,8 @@ func TestAllowsDisjointDynamicPatterns(t *testing.T) {
 			first:  "api-{*subdomain}.example.com",
 			second: "web-{*subdomain}.example.com",
 			matches: []matchCase{
-				{"api-us.foo.example.com", "api-{*subdomain}.example.com", ParamsOf(Param{"subdomain", "us.foo"})},
-				{"web-eu.foo.example.com", "web-{*subdomain}.example.com", ParamsOf(Param{"subdomain", "eu.foo"})},
+				{"api-us.foo.example.com", "api-{*subdomain}.example.com", ParamsOf(Param{Key: "subdomain", Val: "us.foo"})},
+				{"web-eu.foo.example.com", "web-{*subdomain}.example.com", ParamsOf(Param{Key: "subdomain", Val: "eu.foo"})},
 			},
 		},
 		{
@@ -331,7 +331,7 @@ func TestAllowsDisjointDynamicPatterns(t *testing.T) {
 			second: "www.example.com",
 			matches: []matchCase{
 				{"www.example.com", "www.example.com", Params{}},
-				{"api.example.com", "{*subdomain}.example.com", ParamsOf(Param{"subdomain", "api"})},
+				{"api.example.com", "{*subdomain}.example.com", ParamsOf(Param{Key: "subdomain", Val: "api"})},
 			},
 		},
 	}
@@ -373,11 +373,11 @@ func TestMatchSuffixChoosesLongestSuffix(t *testing.T) {
 		prefix string
 		params Params
 	}{
-		{"api.example.com", "tenant", "", ParamsOf(Param{"tenant", "api"})},
-		{"foo.api.example.com", "tenant", "foo", ParamsOf(Param{"tenant", "api"})},
+		{"api.example.com", "tenant", "", ParamsOf(Param{Key: "tenant", Val: "api"})},
+		{"foo.api.example.com", "tenant", "foo", ParamsOf(Param{Key: "tenant", Val: "api"})},
 		{"foo.v1.example.com", "v1", "foo", Params{}},
 		{"Foo.V1.Example.Com.", "v1", "Foo", Params{}},
-		{"foo.bar.example.com", "tenant", "foo", ParamsOf(Param{"tenant", "bar"})},
+		{"foo.bar.example.com", "tenant", "foo", ParamsOf(Param{Key: "tenant", Val: "bar"})},
 	}
 
 	for _, tt := range tests {
@@ -394,6 +394,25 @@ func TestMatchSuffixChoosesLongestSuffix(t *testing.T) {
 	}
 }
 
+func TestMatchSuffixStaticOnly(t *testing.T) {
+	var router Router[string]
+	router.Insert("com", "tld")
+	router.Insert("example.com", "zone")
+	router.Insert("v1.example.com", "v1")
+
+	got, ok := router.MatchSuffix("api.V1.Example.COM.")
+	if !ok {
+		t.Fatal("MatchSuffix static-only: not found")
+	}
+	if got.Value != "v1" || got.Prefix != "api" {
+		t.Fatalf("MatchSuffix static-only = value %q prefix %q, want v1 api", got.Value, got.Prefix)
+	}
+
+	if got, ok := router.MatchSuffix("bad..v1.example.com"); ok {
+		t.Fatalf("MatchSuffix malformed hostname = value %q prefix %q, want miss", got.Value, got.Prefix)
+	}
+}
+
 func TestMatchSuffixCatchAllConsumesPrefix(t *testing.T) {
 	var router Router[string]
 	router.Insert("example.com", "zone")
@@ -406,7 +425,7 @@ func TestMatchSuffixCatchAllConsumesPrefix(t *testing.T) {
 	if got.Value != "subdomain" || got.Prefix != "" {
 		t.Fatalf("MatchSuffix = value %q prefix %q, want subdomain empty", got.Value, got.Prefix)
 	}
-	if !paramsEqual(got.Params, ParamsOf(Param{"subdomain", "api.us"})) {
+	if !paramsEqual(got.Params, ParamsOf(Param{Key: "subdomain", Val: "api.us"})) {
 		t.Fatalf("params = %#v, want subdomain=api.us", got.Params.All())
 	}
 }
@@ -439,7 +458,7 @@ func TestRouterCloneCopiesState(t *testing.T) {
 	if !ok {
 		t.Fatal("clone match tenant: not found")
 	}
-	if got != "tenant" || !paramsEqual(params, ParamsOf(Param{"tenant", "api"})) {
+	if got != "tenant" || !paramsEqual(params, ParamsOf(Param{Key: "tenant", Val: "api"})) {
 		t.Fatalf("clone tenant = %q %#v", got, params.All())
 	}
 
@@ -530,10 +549,10 @@ func TestMatchSuffixIntoReusesParams(t *testing.T) {
 		if got.Value != "tenant" || got.Prefix != "api" {
 			t.Fatalf("MatchSuffixInto = value %q prefix %q, want tenant api", got.Value, got.Prefix)
 		}
-		if !paramsEqual(got.Params, ParamsOf(Param{"tenant", "tenant"})) {
+		if !paramsEqual(got.Params, ParamsOf(Param{Key: "tenant", Val: "tenant"})) {
 			t.Fatalf("params = %#v, want tenant=tenant", got.Params.All())
 		}
-		if !paramsEqual(buf, ParamsOf(Param{"tenant", "tenant"})) {
+		if !paramsEqual(buf, ParamsOf(Param{Key: "tenant", Val: "tenant"})) {
 			t.Fatalf("buffer params = %#v, want tenant=tenant", buf.All())
 		}
 	})

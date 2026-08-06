@@ -77,12 +77,20 @@ func cloneLabelNodeInto[T any](src, dst *labelNode[T], entries map[*routeEntry[T
 		}
 	}
 
-	if len(src.params) != 0 {
-		dst.params = slices.Clone(src.params)
-		for i := range src.params {
+	if src.plainParam != nil {
+		dst.plainParam = new(paramEdge[T])
+		*dst.plainParam = *src.plainParam
+		child := new(labelNode[T])
+		cloneLabelNodeInto(src.plainParam.child, child, entries, nodes)
+		dst.plainParam.child = child
+	}
+
+	if len(src.affixedParams) != 0 {
+		dst.affixedParams = slices.Clone(src.affixedParams)
+		for i := range src.affixedParams {
 			child := new(labelNode[T])
-			cloneLabelNodeInto(src.params[i].child, child, entries, nodes)
-			dst.params[i].child = child
+			cloneLabelNodeInto(src.affixedParams[i].child, child, entries, nodes)
+			dst.affixedParams[i].child = child
 		}
 	}
 

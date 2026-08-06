@@ -43,6 +43,7 @@ func (n *node[T]) insertDynamic(route string, value T) error {
 		patterns:              patterns,
 		captures:              captures,
 		segmentCount:          len(patterns),
+		firstCaptureOffset:    firstCaptureOffset(patterns, captures),
 		order:                 len(n.routes),
 		firstStaticSegment:    firstStaticSegment,
 		hasFirstStaticSegment: hasFirstStaticSegment,
@@ -127,6 +128,18 @@ func (n *node[T]) addFastRoute(entry *routeEntry[T]) {
 	if capturesLen > n.maxSimpleCaptureCount {
 		n.maxSimpleCaptureCount = capturesLen
 	}
+}
+
+func firstCaptureOffset(patterns []segmentPattern, captures []captureMeta) int {
+	if len(captures) == 0 {
+		return 0
+	}
+
+	offset := 0
+	for i := 0; i < int(captures[0].index); i++ {
+		offset += len(patterns[i].raw) + 1
+	}
+	return offset
 }
 
 func (n *node[T]) refreshRootPrefix(entry *routeEntry[T]) {

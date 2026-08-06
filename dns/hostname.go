@@ -5,24 +5,14 @@ import (
 )
 
 func prevHostLabel(host string, end int) (string, int, bool) {
-	if end <= 0 {
+	if end <= 0 || host[end-1] == '.' {
 		return "", 0, false
 	}
-	if host[end-1] == '.' {
+	i := strings.LastIndexByte(host[:end], '.')
+	if end-i-1 > maxLabelLen {
 		return "", 0, false
 	}
-	for i := end - 1; i >= 0; i-- {
-		if host[i] == '.' {
-			if i == end-1 || end-i-1 > maxLabelLen {
-				return "", 0, false
-			}
-			return host[i+1 : end], i, true
-		}
-	}
-	if end > maxLabelLen {
-		return "", 0, false
-	}
-	return host[:end], -1, true
+	return host[i+1 : end], i, true
 }
 
 func nextHostLabel(host string, start int) (string, int, bool) {
