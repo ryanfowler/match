@@ -50,20 +50,30 @@ func (n *node[T]) addExactStatic(key string, entry *routeEntry[T]) {
 	}
 }
 
-func (n *node[T]) matchExactStatic(host string) (*routeEntry[T], bool, bool) {
+func (n *node[T]) matchExactStatic(host string) (*routeEntry[T], bool) {
 	if len(n.exactStatic) == 0 || len(host) > n.maxExactStaticHostLen {
-		return nil, false, true
+		return nil, false
 	}
-	if 'A' <= host[0] && host[0] <= 'Z' {
-		return nil, false, false
+	if host[0] < 'A' || host[0] > 'Z' {
+		if entry := n.exactStatic[host]; entry != nil {
+			return entry, true
+		}
+		if asciiLower(host) {
+			return nil, false
+		}
 	}
-	if entry := n.exactStatic[host]; entry != nil {
-		return entry, true, true
+	return n.matchExactStaticFolded(host)
+}
+
+// Normalize into stack storage. Converting the buffer for a map lookup does
+// not allocate, and avoids walking and hashing each label separately.
+func (n *node[T]) matchExactStaticFolded(host string) (*routeEntry[T], bool) {
+	var folded [maxHostnameLen]byte
+	for i := 0; i < len(host); i++ {
+		folded[i] = lowerASCIIByte(host[i])
 	}
-	if asciiLower(host) {
-		return nil, false, true
-	}
-	return nil, false, false
+	entry := n.exactStatic[string(folded[:len(host)])]
+	return entry, entry != nil
 }
 
 func makeRouteEntry[T any](pattern string, value T, order int) (*routeEntry[T], string, error) {
@@ -74,12 +84,15 @@ func makeRouteEntry[T any](pattern string, value T, order int) (*routeEntry[T], 
 
 	firstStaticLabel, hasFirstStaticLabel := firstDefinitelyStaticLabel(labels)
 	hasCatchAll := hasCatchAll(labels)
+	if len(captures) == 1 {
+		captures[0].prefix = uint32(singleCapturePrefix(labels, captures))
+	}
 	entry := &routeEntry[T]{
 		pattern:             canonicalPattern,
 		labels:              labels,
 		captures:            captures,
 		labelCount:          len(labels),
-		singleCatchSuffix:   singleCatchSuffix(labels, captures),
+		singleCaptureSuffix: singleCaptureSuffix(labels, captures),
 		order:               order,
 		firstStaticLabel:    firstStaticLabel,
 		hasFirstStaticLabel: hasFirstStaticLabel,
@@ -93,8 +106,20 @@ func makeRouteEntry[T any](pattern string, value T, order int) (*routeEntry[T], 
 	return entry, normalizedLabels(labels), nil
 }
 
-func singleCatchSuffix(labels []labelPattern, captures []captureMeta) int {
-	if len(captures) != 1 || !labels[captures[0].index].catchAll {
+// With one capture, every label before and after it has a fixed length.
+func singleCapturePrefix(labels []labelPattern, captures []captureMeta) int {
+	if len(captures) != 1 {
+		return 0
+	}
+	prefix := 0
+	for i := 0; i < int(captures[0].index); i++ {
+		prefix += len(labels[i].raw) + 1
+	}
+	return prefix
+}
+
+func singleCaptureSuffix(labels []labelPattern, captures []captureMeta) int {
+	if len(captures) != 1 {
 		return 0
 	}
 

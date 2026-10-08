@@ -8,14 +8,7 @@ func (n *node[T]) match(hostname string) (T, Params, bool) {
 	}
 
 	if !n.hasDynamic {
-		if entry, ok, done := n.matchExactStatic(host); done {
-			if ok {
-				return entry.value, Params{}, true
-			}
-			var val T
-			return val, Params{}, false
-		}
-		if entry, ok := n.root.matchStaticHostFolded(host, len(host)); ok {
+		if entry, ok := n.matchExactStatic(host); ok {
 			return entry.value, Params{}, true
 		}
 		var val T
@@ -41,14 +34,7 @@ func (n *node[T]) matchInto(hostname string, params *Params) (T, bool) {
 	}
 
 	if !n.hasDynamic {
-		if entry, ok, done := n.matchExactStatic(host); done {
-			if ok {
-				return entry.value, true
-			}
-			var val T
-			return val, false
-		}
-		if entry, ok := n.root.matchStaticHostFolded(host, len(host)); ok {
+		if entry, ok := n.matchExactStatic(host); ok {
 			return entry.value, true
 		}
 		var val T

@@ -78,7 +78,7 @@ func (p *Params) Grow(capacity int) {
 func (p *Params) Append(key, val string) {
 	if p.heap != nil {
 		p.heap = append(p.heap, Param{Key: key, Val: val})
-		p.len = len(p.heap)
+		p.len++
 		return
 	}
 
@@ -92,7 +92,7 @@ func (p *Params) Append(key, val string) {
 	copy(heap, p.inline[:p.len])
 	heap = append(heap, Param{Key: key, Val: val})
 	p.heap = heap
-	p.len = len(heap)
+	p.len++
 }
 
 func (p *Params) truncate(n int) {

@@ -16,60 +16,70 @@ func (m suffixRouteMatch[T]) suffix(host string, params Params) SuffixMatch[T] {
 
 func (n *labelNode[T]) matchSuffixHost(host string, end, consumed int) (suffixRouteMatch[T], bool) {
 	var best suffixRouteMatch[T]
-	if n.value != nil {
-		best = suffixRouteMatch[T]{
-			entry:     n.value,
-			prefixEnd: end,
-			consumed:  consumed,
-		}
-	}
-
-	if end >= 0 {
-		label, next, ok := prevHostLabel(host, end)
-		if !ok {
-			return best, best.entry != nil
+	for {
+		if n.value != nil {
+			best = betterSuffixMatch(best, suffixRouteMatch[T]{
+				entry:     n.value,
+				prefixEnd: end,
+				consumed:  consumed,
+			})
 		}
 
-		if child := n.staticChild(label); child != nil {
-			if candidate, ok := child.matchSuffixHost(host, next, consumed+1); ok {
-				best = betterSuffixMatch(best, candidate)
+		if end >= 0 {
+			label, next, ok := prevHostLabel(host, end)
+			if !ok {
+				return best, best.entry != nil
 			}
-		}
 
-		for i := range n.affixedParams {
-			pattern := n.affixedParams[i].pattern
-			if _, ok := matchAffixedParamPattern(pattern, label); !ok {
-				continue
+			if child := n.staticChild(label); child != nil {
+				if n.plainParam == nil && len(n.affixedParams) == 0 && len(n.catchAll) == 0 {
+					n, end, consumed = child, next, consumed+1
+					continue
+				}
+				if candidate, ok := child.matchSuffixHost(host, next, consumed+1); ok {
+					best = betterSuffixMatch(best, candidate)
+				}
 			}
-			if candidate, ok := n.affixedParams[i].child.matchSuffixHost(host, next, consumed+1); ok {
-				best = betterSuffixMatch(best, candidate)
-			}
-		}
 
-		if n.plainParam != nil {
-			if candidate, ok := n.plainParam.child.matchSuffixHost(host, next, consumed+1); ok {
-				best = betterSuffixMatch(best, candidate)
+			for i := range n.affixedParams {
+				pattern := n.affixedParams[i].pattern
+				if _, ok := matchAffixedParamPattern(pattern, label); !ok {
+					continue
+				}
+				if candidate, ok := n.affixedParams[i].child.matchSuffixHost(host, next, consumed+1); ok {
+					best = betterSuffixMatch(best, candidate)
+				}
 			}
-		}
 
-		if len(n.catchAll) != 0 {
-			remaining := host[:end]
-			if validHostnameLabels(remaining) {
-				for i := range n.catchAll {
-					if _, ok := matchCatchAllPattern(n.catchAll[i].pattern, remaining); ok {
-						candidate := suffixRouteMatch[T]{
-							entry:     n.catchAll[i].route,
-							prefixEnd: -1,
-							consumed:  consumed + countHostnameLabels(remaining),
+			if n.plainParam != nil {
+				if len(n.affixedParams) == 0 && len(n.catchAll) == 0 {
+					n, end, consumed = n.plainParam.child, next, consumed+1
+					continue
+				}
+				if candidate, ok := n.plainParam.child.matchSuffixHost(host, next, consumed+1); ok {
+					best = betterSuffixMatch(best, candidate)
+				}
+			}
+
+			if len(n.catchAll) != 0 {
+				remaining := host[:end]
+				if validHostnameLabels(remaining) {
+					for i := range n.catchAll {
+						if _, ok := matchCatchAllPattern(n.catchAll[i].pattern, remaining); ok {
+							candidate := suffixRouteMatch[T]{
+								entry:     n.catchAll[i].route,
+								prefixEnd: -1,
+								consumed:  consumed + countHostnameLabels(remaining),
+							}
+							best = betterSuffixMatch(best, candidate)
 						}
-						best = betterSuffixMatch(best, candidate)
 					}
 				}
 			}
 		}
-	}
 
-	return best, best.entry != nil
+		return best, best.entry != nil
+	}
 }
 
 func (n *labelNode[T]) matchStaticSuffixHost(host string, end int) (suffixRouteMatch[T], bool) {
@@ -122,28 +132,9 @@ func collectParams[T any](entry *routeEntry[T], host string, start int, params *
 		capture := captures[0]
 		labelIndex := int(capture.index)
 		pattern := entry.labels[labelIndex]
-		if pattern.catchAll {
-			catchEnd := len(host) - entry.singleCatchSuffix
-			if catchEnd < start {
-				return
-			}
-			params.Append(capture.name, host[start+len(pattern.prefix):catchEnd])
-			return
-		}
-
-		labelStart := start
-		for i := 0; i < labelIndex; i++ {
-			_, next, ok := nextHostLabel(host, labelStart)
-			if !ok || next < 0 {
-				return
-			}
-			labelStart = next
-		}
-		label, _, ok := nextHostLabel(host, labelStart)
-		if !ok {
-			return
-		}
-		params.Append(capture.name, label[len(pattern.prefix):len(label)-len(pattern.suffix)])
+		valueStart := start + int(capture.prefix) + len(pattern.prefix)
+		valueEnd := len(host) - entry.singleCaptureSuffix - len(pattern.suffix)
+		params.Append(capture.name, host[valueStart:valueEnd])
 		return
 	}
 

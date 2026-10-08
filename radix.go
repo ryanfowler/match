@@ -5,6 +5,7 @@ import "strings"
 type simpleRadixNode[T any] struct {
 	value    *routeEntry[T]
 	static   []simpleRadixEdge[T]
+	indices  string // First bytes of static edges, in slice order.
 	param    *simpleRadixNode[T]
 	catchAll *routeEntry[T]
 }
@@ -16,6 +17,7 @@ type simpleRadixEdge[T any] struct {
 
 func (n *simpleRadixNode[T]) clone(entries map[*routeEntry[T]]*routeEntry[T]) simpleRadixNode[T] {
 	var cloned simpleRadixNode[T]
+	cloned.indices = n.indices
 	if n.value != nil {
 		cloned.value = entries[n.value]
 	}
@@ -103,78 +105,93 @@ func (n *simpleRadixNode[T]) insertStaticEdge(path string) (*simpleRadixNode[T],
 		oldChild := edge.child
 		edge.label = oldLabel[:common]
 		edge.child = split
-		split.static = append(split.static, simpleRadixEdge[T]{
-			label: oldLabel[common:],
-			child: oldChild,
-		})
+		split.addStaticEdge(oldLabel[common:], oldChild)
 
 		if common == len(path) {
 			return split, ""
 		}
 		child := &simpleRadixNode[T]{}
-		split.static = append(split.static, simpleRadixEdge[T]{
-			label: path[common:],
-			child: child,
-		})
+		split.addStaticEdge(path[common:], child)
 		return child, ""
 	}
 
 	child := &simpleRadixNode[T]{}
-	n.static = append(n.static, simpleRadixEdge[T]{
-		label: path,
-		child: child,
-	})
+	n.addStaticEdge(path, child)
 	return child, ""
 }
 
-func (n *simpleRadixNode[T]) match(path string, index int, params *Params) (*routeEntry[T], bool) {
-	if index == len(path) {
-		if n.value != nil {
-			return n.value, true
-		}
-		return nil, false
-	}
-
-	if child, next := n.staticChild(path, index); child != nil {
-		if entry, ok := child.match(path, next, params); ok {
-			return entry, true
-		}
-	}
-
-	if n.param != nil {
-		end := nextParamEnd(path, index)
-		if end > index {
-			paramLen := params.Len()
-			params.Append("", path[index:end])
-			if entry, ok := n.param.match(path, end, params); ok {
-				return entry, true
-			}
-			params.truncate(paramLen)
-		}
-	}
-
-	if n.catchAll != nil {
-		params.Append("", path[index:])
-		return n.catchAll, true
-	}
-
-	return nil, false
+func (n *simpleRadixNode[T]) addStaticEdge(label string, child *simpleRadixNode[T]) {
+	n.static = append(n.static, simpleRadixEdge[T]{label: label, child: child})
+	n.indices += label[:1]
 }
 
-func (n *simpleRadixNode[T]) staticChild(path string, index int) (*simpleRadixNode[T], int) {
-	if index >= len(path) {
-		return nil, 0
-	}
-	for i := range n.static {
-		edge := &n.static[i]
-		if path[index] != edge.label[0] {
-			continue
+func (n *simpleRadixNode[T]) match(path string, index int, params *Params) (*routeEntry[T], bool) {
+	startLen := params.len
+	for {
+		if index == len(path) {
+			if n.value != nil {
+				return n.value, true
+			}
+			params.truncate(startLen)
+			return nil, false
 		}
-		if len(edge.label) <= len(path)-index && strings.HasPrefix(path[index:], edge.label) {
-			return edge.child, index + len(edge.label)
+
+		var child *simpleRadixNode[T]
+		next := index
+		edgeIndex := -1
+		// Scan first bytes without loading each edge's label and child. Wider
+		// nodes benefit from the optimized byte search in strings.IndexByte.
+		if len(n.indices) > 4 {
+			edgeIndex = strings.IndexByte(n.indices, path[index])
+		} else {
+			for i := 0; i < len(n.indices); i++ {
+				if n.indices[i] == path[index] {
+					edgeIndex = i
+					break
+				}
+			}
 		}
+		if edgeIndex >= 0 {
+			edge := &n.static[edgeIndex]
+			if strings.HasPrefix(path[index:], edge.label) {
+				child, next = edge.child, index+len(edge.label)
+			}
+		}
+		if child != nil {
+			// Only branching nodes need a stack frame for backtracking.
+			if n.param == nil && n.catchAll == nil {
+				n, index = child, next
+				continue
+			}
+			if entry, ok := child.match(path, next, params); ok {
+				return entry, true
+			}
+		}
+
+		if n.param != nil {
+			end := nextParamEnd(path, index)
+			if end > index {
+				paramLen := params.len
+				params.Append("", path[index:end])
+				if n.catchAll == nil {
+					n, index = n.param, end
+					continue
+				}
+				if entry, ok := n.param.match(path, end, params); ok {
+					return entry, true
+				}
+				params.truncate(paramLen)
+			}
+		}
+
+		if n.catchAll != nil {
+			params.Append("", path[index:])
+			return n.catchAll, true
+		}
+
+		params.truncate(startLen)
+		return nil, false
 	}
-	return nil, 0
 }
 
 func nextParamEnd(path string, index int) int {
