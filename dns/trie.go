@@ -127,34 +127,6 @@ func (n *labelNode[T]) matchHost(host string, end int) (*routeEntry[T], bool) {
 	return nil, false
 }
 
-func (n *labelNode[T]) matchStaticHostFolded(host string, end int) (*routeEntry[T], bool) {
-	current := n
-	for end >= 0 {
-		label, next, ok := prevHostLabel(host, end)
-		if !ok {
-			return nil, false
-		}
-		current = current.staticChildFolded(label)
-		if current == nil {
-			return nil, false
-		}
-		end = next
-	}
-	return current.value, current.value != nil
-}
-
-func (n *labelNode[T]) staticChildFolded(label string) *labelNode[T] {
-	if n.staticFoldIndex != nil {
-		return n.staticFoldIndex[foldedLabel(label)]
-	}
-	for i := range n.static {
-		if asciiEqualFold(n.static[i].label, label) {
-			return n.static[i].child
-		}
-	}
-	return nil
-}
-
 func (n *labelNode[T]) staticChild(label string) *labelNode[T] {
 	if n.staticIndex != nil {
 		if child := n.staticIndex[label]; child != nil {

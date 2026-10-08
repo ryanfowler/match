@@ -106,6 +106,33 @@ func BenchmarkMatchMiss(b *testing.B) {
 	}
 }
 
+// Vary requests so measurements include different radix branches and misses.
+func BenchmarkMatchVaryingPaths(b *testing.B) {
+	for _, dynamic := range []bool{false, true} {
+		name := "Static1000"
+		routes := generatedBenchmarkRoutes(1000)
+		paths := append([]string(nil), routes...)
+		if dynamic {
+			name = "Dynamic1000"
+			routes = generatedDynamicBenchmarkRoutes(1000)
+			for i := range paths {
+				paths[i] = "/route-" + strconv.Itoa(i) + "/value"
+			}
+		}
+		for i := 0; i < len(paths); i += 10 {
+			paths[i] += "/missing"
+		}
+		b.Run(name, func(b *testing.B) {
+			router := benchmarkRouter(b, routes)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchString, benchParams, benchOK = router.Match(paths[i%len(paths)])
+			}
+		})
+	}
+}
+
 func BenchmarkMatchInto(b *testing.B) {
 	benchmarks := []struct {
 		name   string

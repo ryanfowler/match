@@ -58,7 +58,7 @@ type routeEntry[T any] struct {
 	labels              []labelPattern
 	captures            []captureMeta
 	labelCount          int
-	singleCatchSuffix   int
+	singleCaptureSuffix int
 	order               int
 	firstStaticLabel    string
 	hasFirstStaticLabel bool
@@ -67,8 +67,9 @@ type routeEntry[T any] struct {
 }
 
 type captureMeta struct {
-	index uint32
-	name  string
+	index  uint32
+	prefix uint32 // Literal bytes before a single capture.
+	name   string
 }
 
 type node[T any] struct {
