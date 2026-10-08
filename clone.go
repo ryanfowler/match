@@ -60,9 +60,12 @@ func cloneRouteEntries[T any](routes []*routeEntry[T], entries map[*routeEntry[T
 	return clonedRoutes
 }
 
+// A nil entries map preserves immutable route entries for compiled snapshots.
+// Router clones pass a map to remap entries to independent copies.
 func cloneSegmentNodeInto[T any](src, dst *segmentNode[T], entries map[*routeEntry[T]]*routeEntry[T], nodes map[*segmentNode[T]]*segmentNode[T]) {
 	nodes[src] = dst
-	if src.value != nil {
+	dst.value = src.value
+	if src.value != nil && entries != nil {
 		dst.value = entries[src.value]
 	}
 
@@ -100,8 +103,10 @@ func cloneSegmentNodeInto[T any](src, dst *segmentNode[T], entries map[*routeEnt
 
 	if len(src.catchAll) != 0 {
 		dst.catchAll = slices.Clone(src.catchAll)
-		for i := range src.catchAll {
-			dst.catchAll[i].route = entries[src.catchAll[i].route]
+		if entries != nil {
+			for i := range src.catchAll {
+				dst.catchAll[i].route = entries[src.catchAll[i].route]
+			}
 		}
 	}
 }

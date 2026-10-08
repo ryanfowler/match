@@ -61,19 +61,14 @@ type captureMeta struct {
 }
 
 type node[T any] struct {
+	prefixTrie[T]
 	routes                []*routeEntry[T]
-	exactStatic           map[string]*routeEntry[T]
-	maxExactStaticPathLen int
 	fastRoot              simpleRadixNode[T]
 	hasComplexParams      bool
 	hasSimpleDynamic      bool
-	hasDynamic            bool
 	maxSimpleCaptureCount int
 	normalized            map[string]string
 	conflictIndex         routeConflictIndex[T]
-	root                  segmentNode[T]
-	absoluteRoot          *segmentNode[T]
-	rootPrefix            *routeEntry[T]
 }
 
 type routeConflictIndex[T any] struct {

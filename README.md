@@ -25,6 +25,8 @@ Key properties:
 - Parameter storage is allocation-conscious: up to four captures are stored
   inline, and `MatchInto` / `MatchPrefixInto` let hot paths reuse storage.
 - `Clone` can copy a route table before extending it independently.
+- `Compile` creates an immutable matcher with lookup plans selected for the
+  registered route table.
 - After registration, a router can be shared by multiple goroutines for
   matching.
 
@@ -123,6 +125,30 @@ got, ok := router.MatchPrefix("/api/v1/users/42")
 ```
 
 Use `MatchPrefixInto` to reuse parameter storage for prefix matches.
+
+Use `Compile` after registration to create an immutable matcher for a hot path:
+
+```go
+matcher := router.Compile()
+
+value, params, ok := matcher.Match("/users/42")
+// MatchInto, MatchPrefix, and MatchPrefixInto are also available.
+```
+
+The matcher preserves the router's grammar, precedence, and path semantics.
+Later inserts into the router do not affect it; call `Compile` again to create
+an updated snapshot. The matcher shares immutable route entries; stored values
+retain the same assignment semantics as `Clone`.
+Synchronize compilation with insertion. The completed matcher can be shared
+across goroutines, using separate parameter buffers for concurrent `Into` calls.
+
+Compilation adds startup work and memory in exchange for specialized exact
+lookups. Tables made from literal prefixes followed by one final whole-segment
+parameter use a direct prefix map. In mixed tables, partial-segment patterns
+use a general matcher for their branch while unrelated branches retain simple
+lookup plans. Other simple routes use the compressed radix matcher. Prefix
+matching uses an independent copy of the segment trie. Performance gains depend
+on the route table and request distribution.
 
 After routes are registered, a router may be used by multiple goroutines for
 matching. If routes are inserted while other goroutines are using the router,

@@ -4,7 +4,7 @@ import (
 	"strings"
 )
 
-func (n *node[T]) insertTree(entry *routeEntry[T]) {
+func (n *prefixTrie[T]) insertTree(entry *routeEntry[T]) {
 	current := &n.root
 	for i, pattern := range entry.patterns {
 		if pattern.catchAll {
