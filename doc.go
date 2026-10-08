@@ -72,6 +72,10 @@
 // match consumes the full path. Clone returns an independent copy of a Router's
 // routing state for cases where a route table needs to be extended without
 // mutating the original.
+// Compile returns an immutable Matcher snapshot with lookup plans selected for
+// the registered route table. Matcher provides the same four matching methods
+// as Router. Subsequent inserts into the router do not affect a compiled
+// snapshot; callers must synchronize compilation with insertion.
 //
 // # Matching Behavior and Conflicts
 //

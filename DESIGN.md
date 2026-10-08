@@ -38,8 +38,13 @@ because `Params.Seq` exposes an `iter.Seq2`.
 | --- | --- |
 | `doc.go` | Package-level documentation and public behavior summary. |
 | `match.go` | Public `Router[T]` and `PrefixMatch[T]` API surface. |
-| `node.go` | Route parser, route entries, conflict detection, matcher selection, generic trie construction, exact matching, prefix matching, and low-level path helpers. |
+| `node.go` | Internal route entries and router, segment node, and edge types. |
+| `node_match.go` | Exact matching and reusable parameter buffer matching. |
+| `prefix.go` | Shared trie state, static lookup, prefix matching, and root dispatch. |
 | `radix.go` | Compressed radix fast path for simple dynamic routes made from static text, whole-segment params, and trailing catch-all params. |
+| `compile.go` | Immutable Matcher snapshots, terminal parameter maps, and branch-local fallback plans. |
+| `compile_test.go` | Compiled matching parity, snapshot isolation, concurrent source insertion, and fuzz tests. |
+| `compile_bench_test.go` | Compilation and compiled lookup benchmarks against Router. |
 | `params.go` | Public `Param` and `Params` types plus allocation-conscious parameter storage helpers. |
 | `match_test.go` | Behavioral tests for route grammar, matching, prefix matching, conflicts, and `Params`. |
 | `match_bench_test.go` | Benchmarks for insertion, exact matching, prefix matching, misses, and reusable parameter buffers. |
@@ -612,13 +617,53 @@ catch-all captures must be non-empty.
 When multiple existing routes conflict with a new route, `earlierConflict`
 reports the earliest registered one. This keeps error reporting deterministic.
 
+## Compiled Matchers
+
+`Router.Compile` creates an immutable `Matcher` snapshot with the same exact
+and prefix matching semantics. It copies matching trees and the exact static
+map, while sharing immutable route entries. The snapshot has no insertion or
+conflict-index state. Future registrations cannot change its matching results.
+Stored values retain the same assignment semantics as `Clone`.
+
+Compilation selects an exact matching plan from the dynamic routes:
+
+- Routes consisting of literal sections followed by one final whole-section
+  parameter use a map keyed by the literal prefix, including its final slash.
+  Matching finds the final slash, looks up the preceding text, and captures the
+  remaining non-empty section. Relative parameter-only routes use an empty key.
+- Other tables containing only simple routes use a compressed radix tree.
+- Tables containing partial-section parameters are partitioned by their first
+  definitely-static section, separately for absolute and relative routes.
+  Entire simple branches contribute to a combined radix tree or terminal
+  parameter map; complex branches get their own segment trie. Routes without
+  a definitely-static section form the final wildcard fallback.
+
+Exact static routes are checked first. A whole static branch outranks a wildcard
+branch at the same position, so successful simple branch lookups can return
+without checking unrelated complex branches. A branch containing both plain
+and affixed parameters stays in the general matcher to preserve specificity.
+Failed radix walks roll captures back before the next plan is tried.
+
+Prefix matching uses a separate snapshot of the complete segment trie, retaining
+longest-prefix selection and the special root-route behavior. It does not use
+the terminal parameter shortcut. The performance optimizations target exact
+matching; prefix matching uses the Router's existing traversal.
+Compilation requires external synchronization
+with insertion; completed matchers support concurrent reads with separate
+parameter buffers for concurrent `Into` calls.
+
+The specialized plans do not emit Go source or require a code generation step.
+Their startup cost and memory use are additional to the registration builder.
+Benchmarks compare exact `Router` and `Matcher` lookups using shuffled requests,
+including misses and tables with unrelated affixed parameters.
+
 ## Prefix Matching
 
 Prefix matching uses the same trie and segment grammar as exact matching. The
 difference is that it tracks the best route value encountered while walking the
 path.
 
-`node.matchPrefixRoute` does three things:
+`prefixTrie.matchPrefixRoute` does three things:
 
 1. Calls `matchRoot` to choose the starting trie node and path index.
 2. Calls `segmentNode.matchPrefixPath` to find the best trie prefix.
