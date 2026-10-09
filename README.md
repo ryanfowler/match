@@ -126,13 +126,33 @@ got, ok := router.MatchPrefix("/api/v1/users/42")
 
 Use `MatchPrefixInto` to reuse parameter storage for prefix matches.
 
+Use `MatchPrefixAppend` and `MatchAppend` when several routers add captures to
+one buffer. These methods do not reset the buffer. They append the new captures
+after the parameters that are already there. When no route matches, the buffer
+is unchanged:
+
+```go
+var mounts, routes match.Router[string]
+mounts.Insert("/orgs/{org}", "mount")
+routes.Insert("/repos/{repo}", "repo")
+
+var params match.Params
+_, rest, ok := mounts.MatchPrefixAppend("/orgs/acme/repos/match", &params)
+// rest == "/repos/match"
+value, ok := routes.MatchAppend(rest, &params)
+// value == "repo"
+// params contains org=acme, then repo=match
+_, _ = value, ok
+```
+
 Use `Compile` after registration to create an immutable matcher for a hot path:
 
 ```go
 matcher := router.Compile()
 
 value, params, ok := matcher.Match("/users/42")
-// MatchInto, MatchPrefix, and MatchPrefixInto are also available.
+// MatchInto, MatchAppend, MatchPrefix, MatchPrefixInto, and
+// MatchPrefixAppend are also available.
 ```
 
 The matcher preserves the router's grammar, precedence, and path semantics.
@@ -140,7 +160,8 @@ Later inserts into the router do not affect it; call `Compile` again to create
 an updated snapshot. The matcher shares immutable route entries; stored values
 retain the same assignment semantics as `Clone`.
 Synchronize compilation with insertion. The completed matcher can be shared
-across goroutines, using separate parameter buffers for concurrent `Into` calls.
+across goroutines, using separate parameter buffers for concurrent `Into` and
+`Append` calls.
 
 Compilation adds startup work and memory in exchange for specialized exact
 lookups. Tables made from literal prefixes followed by one final whole-segment
@@ -292,6 +313,18 @@ for _, path := range paths {
 }
 ```
 
+`Truncate` and `SetVal` edit a `Params` value in place. Use `Truncate` to
+discard the captures of a match that you decide not to use. Use `SetVal` to
+replace one captured value:
+
+```go
+mark := params.Len()
+if _, ok := router.MatchAppend(path, &params); ok {
+	params.SetVal(mark, "replacement") // First capture of this match.
+	params.Truncate(mark)              // Discard the captures of this match.
+}
+```
+
 ## Insert Errors and Conflicts
 
 `TryInsert` returns an error when a route is invalid, duplicated, or ambiguous.
@@ -410,7 +443,9 @@ Parameters are collected after the winning route is selected, using the
 canonical route entry's capture names. `Params` stores up to four captures
 inline and grows to a slice only when needed. `MatchInto` and
 `MatchPrefixInto` reset and reuse a caller-provided `*Params`, which avoids
-heap allocation for common hot-path routing loops.
+heap allocation for common hot-path routing loops. `MatchAppend` and
+`MatchPrefixAppend` do not reset the buffer, so nested matchers can collect
+their captures in one `Params` value without a merge step.
 
 Prefix matching uses the same trie and route grammar as exact matching. It
 tracks the best whole-segment prefix while walking the tree, chooses the route

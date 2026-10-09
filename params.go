@@ -21,7 +21,8 @@ const (
 //
 // Params is an opaque value type. Use Len and At to inspect captures without
 // allocation, Get or TryGet to look up a named capture, and AppendTo or All
-// when a []Param snapshot is needed. Up to four captures are stored inline.
+// when a []Param snapshot is needed. Use Truncate and SetVal to edit captures
+// in place. Up to four captures are stored inline.
 type Params struct {
 	len    int
 	inline [inlineParamCapacity]Param
@@ -30,9 +31,9 @@ type Params struct {
 
 // NewParams returns an empty Params value with room for capacity parameters.
 //
-// It is most useful with Router.MatchInto when callers want to reuse storage
-// across matches. Capacity values of four or less use the inline storage built
-// into Params.
+// It is most useful with Router.MatchInto and Router.MatchAppend when callers
+// want to reuse storage across matches. Capacity values of four or less use
+// the inline storage built into Params.
 func NewParams(capacity int) Params {
 	if capacity <= inlineParamCapacity {
 		return Params{}
@@ -95,7 +96,10 @@ func (p *Params) Append(key, val string) {
 	p.len++
 }
 
-func (p *Params) truncate(n int) {
+// Truncate discards all parameters after the first n.
+//
+// It panics if n is outside the range [0, Len()].
+func (p *Params) Truncate(n int) {
 	if n < 0 || n > p.len {
 		panic("match: parameter length out of range")
 	}
@@ -103,6 +107,20 @@ func (p *Params) truncate(n int) {
 	if p.heap != nil {
 		p.heap = p.heap[:n]
 	}
+}
+
+// SetVal replaces the value of the parameter at index i.
+//
+// It panics if i is outside the range [0, Len()).
+func (p *Params) SetVal(i int, val string) {
+	if i < 0 || i >= p.len {
+		panic("match: parameter index out of range")
+	}
+	if p.heap != nil {
+		p.heap[i].Val = val
+		return
+	}
+	p.inline[i].Val = val
 }
 
 func (p *Params) setKey(i int, key string) {

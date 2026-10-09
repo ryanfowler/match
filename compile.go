@@ -96,6 +96,17 @@ func (m *Matcher[T]) Match(path string) (T, Params, bool) {
 // must be non-nil.
 func (m *Matcher[T]) MatchInto(path string, params *Params) (T, bool) {
 	params.Reset()
+	return m.matchAppend(path, params)
+}
+
+// MatchAppend is like MatchInto, but it keeps the parameters already in
+// params and appends the new captures after them, with the same semantics as
+// Router.MatchAppend. When the result is false, params is unchanged.
+func (m *Matcher[T]) MatchAppend(path string, params *Params) (T, bool) {
+	return m.matchAppend(path, params)
+}
+
+func (m *Matcher[T]) matchAppend(path string, params *Params) (T, bool) {
 	if entry := m.staticEntry(path); entry != nil {
 		return entry.value, true
 	}
@@ -144,6 +155,13 @@ func (m *Matcher[T]) MatchPrefix(path string) (PrefixMatch[T], bool) {
 // before matching and must be non-nil.
 func (m *Matcher[T]) MatchPrefixInto(path string, params *Params) (PrefixMatch[T], bool) {
 	return m.prefix.matchPrefixInto(path, params)
+}
+
+// MatchPrefixAppend is like MatchPrefixInto, but it keeps the parameters
+// already in params and it does not return a copy of them, with the same
+// semantics as Router.MatchPrefixAppend.
+func (m *Matcher[T]) MatchPrefixAppend(path string, params *Params) (value T, rest string, ok bool) {
+	return m.prefix.matchPrefixAppend(path, params)
 }
 
 func (m *Matcher[T]) staticEntry(path string) *routeEntry[T] {
@@ -311,7 +329,7 @@ func (p *matchPlan[T]) match(path string, params *Params) *routeEntry[T] {
 			return entry
 		}
 	case planBranches:
-		// Match and MatchInto already tried the terminal and radix plans.
+		// Match and MatchAppend already tried the terminal and radix plans.
 		// Those plans contain entire static branches and therefore outrank
 		// wildcard branches. Only branches with complex patterns remain here.
 		groups, index := p.relative, 0

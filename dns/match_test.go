@@ -3,6 +3,7 @@ package dns
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -533,6 +534,43 @@ func TestMatchIntoMissPreservesHeapParams(t *testing.T) {
 	})
 	if allocs != 0 {
 		t.Fatalf("allocs per MatchInto after miss = %v, want 0", allocs)
+	}
+}
+
+func TestMatchAppendKeepsExistingParams(t *testing.T) {
+	var static, dynamic Router[string]
+	static.Insert("example.com", "static")
+	dynamic.Insert("example.com", "static")
+	dynamic.Insert("{tenant}.example.com", "tenant")
+	dynamic.Insert("{a}.{b}.{c}.{d}.{e}.example.org", "many")
+
+	for _, tc := range []struct {
+		router   *Router[string]
+		hostname string
+		value    string
+		want     []Param
+	}{
+		{&static, "Example.com", "static", nil},
+		{&static, "missing.example.com", "", nil},
+		{&static, "bad..example.com", "", nil},
+		{&dynamic, "example.com.", "static", nil},
+		{&dynamic, "acme.example.com", "tenant", []Param{{Key: "tenant", Val: "acme"}}},
+		{&dynamic, "1.2.3.4.5.example.org", "many", []Param{{Key: "a", Val: "1"}, {Key: "b", Val: "2"}, {Key: "c", Val: "3"}, {Key: "d", Val: "4"}, {Key: "e", Val: "5"}}},
+		{&dynamic, "a.b.example.com", "", nil},
+		{&dynamic, "bad..example.com", "", nil},
+	} {
+		for _, seedCount := range []int{0, 2, 4, 6} {
+			var seeded, params Params
+			for i := range seedCount {
+				seeded.Append("seed", strconv.Itoa(i))
+				params.Append("seed", strconv.Itoa(i))
+			}
+			want := Merge(seeded, ParamsOf(tc.want...))
+			got, ok := tc.router.MatchAppend(tc.hostname, &params)
+			if got != tc.value || ok != (tc.value != "") || !paramsEqual(params, want) {
+				t.Fatalf("MatchAppend(%q) with %d seeded = %q, %#v, %v; want %q, %#v", tc.hostname, seedCount, got, params.All(), ok, tc.value, want.All())
+			}
+		}
 	}
 }
 

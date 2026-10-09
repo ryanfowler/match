@@ -124,8 +124,8 @@ func collectParams[T any](entry *routeEntry[T], host string, start int, params *
 		return
 	}
 
-	if len(captures) > inlineParamCapacity {
-		params.Grow(len(captures))
+	if total := params.Len() + len(captures); total > inlineParamCapacity {
+		params.Grow(total)
 	}
 
 	if len(captures) == 1 {

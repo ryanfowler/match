@@ -69,12 +69,14 @@
 // caller-provided *Params value as reusable storage. MatchPrefix and
 // MatchPrefixInto return the best whole-segment route prefix plus the remaining
 // path, which is useful for mounts and nested dispatch. Rest is / when a prefix
-// match consumes the full path. Clone returns an independent copy of a Router's
-// routing state for cases where a route table needs to be extended without
-// mutating the original.
+// match consumes the full path. MatchAppend and MatchPrefixAppend keep the
+// parameters already in the caller-provided *Params value and append the new
+// captures after them, so nested matchers can share one buffer. Clone returns
+// an independent copy of a Router's routing state for cases where a route
+// table needs to be extended without mutating the original.
 // Compile returns an immutable Matcher snapshot with lookup plans selected for
-// the registered route table. Matcher provides the same four matching methods
-// as Router. Subsequent inserts into the router do not affect a compiled
+// the registered route table. Matcher provides the same matching methods as
+// Router. Subsequent inserts into the router do not affect a compiled
 // snapshot; callers must synchronize compilation with insertion.
 //
 // # Matching Behavior and Conflicts
@@ -98,6 +100,7 @@
 // use Len and At to iterate without allocation, Get or TryGet to look up named
 // parameters, Seq for range-over-function iteration, Merge to concatenate
 // parameter sets, and AppendTo or All when a []Param snapshot is needed.
+// Truncate discards trailing parameters and SetVal replaces one value in place.
 //
 // # Internals
 //
@@ -123,7 +126,8 @@
 // canonical route entry's capture names. Params stores up to four captures
 // inline and grows to a slice only when needed. MatchInto and MatchPrefixInto
 // reset and reuse a caller-provided *Params value, which avoids heap allocation
-// for common hot-path routing loops.
+// for common hot-path routing loops. MatchAppend and MatchPrefixAppend do not
+// reset the value. They leave it unchanged when no route matches.
 //
 // Callers that insert routes while other goroutines use the router must
 // synchronize access.

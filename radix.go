@@ -132,7 +132,7 @@ func (n *simpleRadixNode[T]) match(path string, index int, params *Params) (*rou
 			if n.value != nil {
 				return n.value, true
 			}
-			params.truncate(startLen)
+			params.Truncate(startLen)
 			return nil, false
 		}
 
@@ -180,7 +180,7 @@ func (n *simpleRadixNode[T]) match(path string, index int, params *Params) (*rou
 				if entry, ok := n.param.match(path, end, params); ok {
 					return entry, true
 				}
-				params.truncate(paramLen)
+				params.Truncate(paramLen)
 			}
 		}
 
@@ -189,7 +189,7 @@ func (n *simpleRadixNode[T]) match(path string, index int, params *Params) (*rou
 			return n.catchAll, true
 		}
 
-		params.truncate(startLen)
+		params.Truncate(startLen)
 		return nil, false
 	}
 }
@@ -214,9 +214,13 @@ func commonPrefixLen(a, b string) int {
 	return max
 }
 
+// applySimpleParamNames names the captures that a simple radix match appended
+// to params. The radix tree appends one unnamed value per capture, so the
+// captures of entry are the last len(entry.captures) parameters.
 func applySimpleParamNames[T any](entry *routeEntry[T], params *Params) {
+	base := params.len - len(entry.captures)
 	for i, capture := range entry.captures {
-		params.setKey(i, capture.name)
+		params.setKey(base+i, capture.name)
 	}
 }
 
