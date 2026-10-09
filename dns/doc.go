@@ -52,8 +52,9 @@
 // patterns are considered last.
 //
 // Match looks up an exact hostname. MatchInto is the same operation using a
-// caller-provided *Params value as reusable storage. MatchSuffix and
-// MatchSuffixInto return the best whole-label hostname suffix plus the
+// caller-provided *Params value as reusable storage. MatchAppend keeps the
+// parameters already in that value and appends the new captures. MatchSuffix
+// and MatchSuffixInto return the best whole-label hostname suffix plus the
 // unmatched leading prefix, which is useful for zone-style dispatch. Clone
 // returns an independent copy of a Router's matching state.
 package dns

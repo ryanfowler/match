@@ -211,6 +211,9 @@ it needs during insertion. The methods delegate directly to the internal root:
   remaining path.
 - `MatchPrefixInto(path, &params)` combines prefix matching with reusable
   parameter storage.
+- `MatchAppend(path, &params)` and `MatchPrefixAppend(path, &params)` match
+  like the `Into` methods, but they keep the parameters already in `params`
+  and append the new captures. On a miss, `params` is unchanged.
 - `Clone()` returns an independent copy of the router's internal route table,
   trie, and conflict index.
 
@@ -751,6 +754,8 @@ The main operations are:
 - `ParamsOf` constructs a `Params` from explicit values.
 - `Reset`, `Grow`, and `Append` expose mutating reusable builder operations needed
   by sub-packages while preserving the opaque representation.
+- `Truncate` and `SetVal` edit captures in place. Callers use them to discard
+  the captures of a match they do not use and to replace a captured value.
 - `Merge` concatenates two parameter sets without deduplicating keys.
 - `Len` and `At` provide indexed access.
 - `Get` and `TryGet` perform linear name lookup.
@@ -765,6 +770,17 @@ small, and avoiding a map keeps the hot path compact.
 preserving heap capacity. This is why `MatchInto`, `MatchPrefixInto`, and the
 DNS package's `Into` methods can avoid allocation after the caller has provided
 a sufficiently large buffer.
+
+Each `Into` method is `Reset` followed by the matching `Append` method. The
+`Append` methods are the single implementation. They rely on two rules:
+
+- Captures are appended only after the winning route is known. The simple
+  radix tree is the exception. It appends unnamed values while it walks and
+  truncates back to the starting length when a branch fails.
+- Capture names for a radix match are written to the last captures in the
+  buffer, not to indexes that start at zero.
+
+These rules give the guarantee that a failed match leaves `params` unchanged.
 
 ## Error Model
 

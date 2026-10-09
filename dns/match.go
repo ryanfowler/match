@@ -60,7 +60,15 @@ func (r *Router[T]) Match(hostname string) (T, Params, bool) {
 // Params is reset before matching and must be non-nil. Use NewParams to create
 // a reusable Params buffer large enough for the expected number of captures.
 func (r *Router[T]) MatchInto(hostname string, params *Params) (T, bool) {
-	return r.root.matchInto(hostname, params)
+	params.Reset()
+	return r.root.matchAppend(hostname, params)
+}
+
+// MatchAppend is like MatchInto, but it keeps the parameters already in
+// params and appends the new captures after them. When the result is false,
+// params is unchanged.
+func (r *Router[T]) MatchAppend(hostname string, params *Params) (T, bool) {
+	return r.root.matchAppend(hostname, params)
 }
 
 // MatchSuffix returns the value, parameters, and unmatched prefix for the best

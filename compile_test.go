@@ -134,6 +134,7 @@ func checkCompiledMatch(t *testing.T, router *Router[string], matcher *Matcher[s
 			t.Fatalf("compiled prefix storage(%q) = %v; want %v", path, params.All(), wantPrefix.Params.All())
 		}
 	}
+	checkAppendMatch(t, router, matcher, path)
 }
 
 func TestCompileMatching(t *testing.T) {

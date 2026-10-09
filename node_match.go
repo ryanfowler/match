@@ -28,8 +28,7 @@ func (n *node[T]) match(route string) (T, Params, bool) {
 	return entry.value, params, true
 }
 
-func (n *node[T]) matchInto(route string, params *Params) (T, bool) {
-	params.Reset()
+func (n *node[T]) matchAppend(route string, params *Params) (T, bool) {
 	if entry, ok := n.matchExactStatic(route); ok {
 		return entry.value, true
 	}

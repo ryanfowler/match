@@ -38,12 +38,18 @@ func (n *prefixTrie[T]) matchPrefix(path string) (PrefixMatch[T], bool) {
 
 func (n *prefixTrie[T]) matchPrefixInto(path string, params *Params) (PrefixMatch[T], bool) {
 	params.Reset()
+	value, rest, ok := n.matchPrefixAppend(path, params)
+	return PrefixMatch[T]{Value: value, Params: *params, Rest: rest}, ok
+}
+
+func (n *prefixTrie[T]) matchPrefixAppend(path string, params *Params) (T, string, bool) {
 	match, ok := n.matchPrefixRoute(path)
 	if !ok {
-		return PrefixMatch[T]{Params: *params}, false
+		var zero T
+		return zero, "", false
 	}
 	collectParams(match.entry, path, params)
-	return match.prefix(path, *params), true
+	return match.entry.value, remainingPrefixPath(path, match.restIndex), true
 }
 
 func (n *prefixTrie[T]) matchPrefixRoute(path string) (prefixMatch[T], bool) {

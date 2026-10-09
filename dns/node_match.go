@@ -25,8 +25,7 @@ func (n *node[T]) match(hostname string) (T, Params, bool) {
 	return entry.value, params, true
 }
 
-func (n *node[T]) matchInto(hostname string, params *Params) (T, bool) {
-	params.Reset()
+func (n *node[T]) matchAppend(hostname string, params *Params) (T, bool) {
 	host, ok := hostnameWithinBounds(hostname)
 	if !ok {
 		var val T

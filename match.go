@@ -59,7 +59,18 @@ func (r *Router[T]) Match(path string) (T, Params, bool) {
 // Params is reset before matching and must be non-nil. Use NewParams to create
 // a reusable Params buffer large enough for the expected number of captures.
 func (r *Router[T]) MatchInto(path string, params *Params) (T, bool) {
-	return r.root.matchInto(path, params)
+	params.Reset()
+	return r.root.matchAppend(path, params)
+}
+
+// MatchAppend is like MatchInto, but it keeps the parameters already in
+// params and appends the new captures after them. When the result is false,
+// params is unchanged.
+//
+// Use it when several matchers contribute captures to one buffer, such as a
+// prefix match followed by an exact match on the remaining path.
+func (r *Router[T]) MatchAppend(path string, params *Params) (T, bool) {
+	return r.root.matchAppend(path, params)
 }
 
 // MatchPrefix returns the value, parameters, and remaining path for the best
@@ -79,4 +90,13 @@ func (r *Router[T]) MatchPrefix(path string) (PrefixMatch[T], bool) {
 // a reusable Params buffer large enough for the expected number of captures.
 func (r *Router[T]) MatchPrefixInto(path string, params *Params) (PrefixMatch[T], bool) {
 	return r.root.matchPrefixInto(path, params)
+}
+
+// MatchPrefixAppend is like MatchPrefixInto, but it keeps the parameters
+// already in params and it does not return a copy of them. The new captures
+// are appended after the existing parameters.
+//
+// When ok is false, params is unchanged and rest is empty.
+func (r *Router[T]) MatchPrefixAppend(path string, params *Params) (value T, rest string, ok bool) {
+	return r.root.matchPrefixAppend(path, params)
 }

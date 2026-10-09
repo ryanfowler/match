@@ -234,6 +234,77 @@ func BenchmarkMatchPrefixInto(b *testing.B) {
 	}
 }
 
+// BenchmarkMatchAppend measures nested dispatch: a prefix match selects a
+// mount, then an exact match runs on the remaining path. Append collects the
+// captures of both levels in one shared buffer. IntoMerge is the equivalent
+// without the append methods: one buffer per level, then Merge.
+func BenchmarkMatchAppend(b *testing.B) {
+	benchmarks := []struct {
+		name   string
+		mounts []string
+		routes []string
+		path   string
+	}{
+		{
+			name:   "Param",
+			mounts: []string{"/", "/api/{version}", "/assets/{*path}"},
+			routes: []string{"/", "/users/{id}", "/users/{id}/posts"},
+			path:   "/api/v1/users/42",
+		},
+		{
+			name:   "ManyParams",
+			mounts: []string{"/", "/orgs/{org}/teams/{team}", "/assets/{*path}"},
+			routes: []string{"/", "/repos/{repo}/issues/{issue}", "/repos/{repo}"},
+			path:   "/orgs/acme/teams/core/repos/match/issues/7",
+		},
+	}
+
+	for _, bm := range benchmarks {
+		mountRouter := benchmarkRouter(b, bm.mounts)
+		routeRouter := benchmarkRouter(b, bm.routes)
+		mountMatcher, routeMatcher := mountRouter.Compile(), routeRouter.Compile()
+		levels := []struct {
+			name            string
+			matchPrefix     func(string, *Params) (string, string, bool)
+			match           func(string, *Params) (string, bool)
+			matchPrefixInto func(string, *Params) (PrefixMatch[string], bool)
+			matchInto       func(string, *Params) (string, bool)
+		}{
+			{"Router", mountRouter.MatchPrefixAppend, routeRouter.MatchAppend, mountRouter.MatchPrefixInto, routeRouter.MatchInto},
+			{"Matcher", mountMatcher.MatchPrefixAppend, routeMatcher.MatchAppend, mountMatcher.MatchPrefixInto, routeMatcher.MatchInto},
+		}
+
+		for _, level := range levels {
+			b.Run(bm.name+"/"+level.name+"/Append", func(b *testing.B) {
+				var params Params
+				b.ReportAllocs()
+				b.ResetTimer()
+
+				for i := 0; i < b.N; i++ {
+					params.Reset()
+					var rest string
+					_, rest, benchOK = level.matchPrefix(bm.path, &params)
+					benchString, benchOK = level.match(rest, &params)
+					benchParamLen = params.Len()
+				}
+			})
+
+			b.Run(bm.name+"/"+level.name+"/IntoMerge", func(b *testing.B) {
+				var mountParams, routeParams Params
+				b.ReportAllocs()
+				b.ResetTimer()
+
+				for i := 0; i < b.N; i++ {
+					benchPrefix, benchOK = level.matchPrefixInto(bm.path, &mountParams)
+					benchString, benchOK = level.matchInto(benchPrefix.Rest, &routeParams)
+					benchParams = Merge(benchPrefix.Params, routeParams)
+					benchParamLen = benchParams.Len()
+				}
+			})
+		}
+	}
+}
+
 func BenchmarkInsert(b *testing.B) {
 	benchmarks := []struct {
 		name   string
